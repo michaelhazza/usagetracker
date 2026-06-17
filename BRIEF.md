@@ -6,7 +6,10 @@
 > safety/operational guardrails for the highest-risk part — replaying full browser headers:
 > canonical fixture format (§0), credential-injection-after-allowlist + redirects-off (contract #4),
 > validate-before-save (§4), stable credential key naming and secret-free export (account mgmt /
-> packaging), first-run empty state (UI), and a merge-gating fixture-safety test (§12). See
+> packaging), first-run empty state (UI), and a merge-gating fixture-safety test (§12). v3.2 adds
+> three final guardrails before Track A: redaction extends to user-visible dialogs/toasts/diagnostics
+> (contract #7), manual "Refresh now" bypasses cadence but not safety controls (§11), and a testable
+> `Challenge` detector so edge interstitials aren't misclassified as `ParseFailed` (§3). See
 > **§0 Readiness & sequencing** first — it is the most important section.
 
 Paste this into Claude Code as the project brief.
@@ -140,6 +143,9 @@ These are hard requirements, not suggestions:
 7. **Redaction by default.** Logs and diagnostics must redact `Authorization`, `Cookie`,
    `Set-Cookie`, access/refresh tokens, account IDs, org IDs, emails, and raw response bodies.
    Redaction is unit-tested (§12).
+   - **Applies to every surface, not just log files.** User-visible error dialogs, toast/notification
+     messages, debug panels, and copied diagnostics are subject to the same redaction. Never display
+     raw request headers, raw response bodies, or full URLs that carry sensitive query parameters.
 8. **No telemetry, crash upload, analytics, or third-party network calls** of any kind.
 9. **Single instance.** Launching a second copy focuses/opens the existing tray popup instead of
    starting a new process.
@@ -181,7 +187,10 @@ The adapter returns a discriminated result, **not** a struct with a free-text `e
   - `RateLimited` (429) → drives backoff (§11); show "rate limited" not "error".
   - `NetworkTimeout` (DNS/connect/read timeout) → show "stale", retry next cycle.
   - `Challenge` (edge/anti-bot interstitial, see R1) → distinct message; likely needs full header
-    replay or the extension path.
+    replay or the extension path. **Detection:** a non-JSON HTML/interstitial response from an
+    allowlisted host — especially one containing common challenge markers (`cf-chl`, `cloudflare`,
+    `just a moment`, CAPTCHA, or "JavaScript required" text). Such responses must classify as
+    `Challenge`, **not** `ParseFailed` (tested with fixtures in §12).
   - `ParseFailed` (HTTP 200 but mappings didn't resolve) → "config problem," point user at the
     Request Template editor.
 - **Validation = successful parse, not identity.** "Success" means **at least one** of
@@ -276,6 +285,11 @@ copy blindly): `Zrnik/claude-usage-windows-taskbar-widget`,
 - **Stale indicator:** show "stale" when the last *good* refresh is older than **2× the current
   cadence**.
 - These are starting points; the cadence ceiling is governed by the R3 risk decision.
+- **Manual "Refresh now" bypasses the cadence timer but not the safety controls.** Hostname
+  allowlist, credential-injection rules (contract #4), per-request timeout, redaction, and
+  per-account isolation all still apply. If an account is currently in 429 backoff, manual refresh
+  retries *only that account* and only after explicit user confirmation — so a user can't hammer an
+  already-rate-limited account.
 
 ## Packaging & startup
 
