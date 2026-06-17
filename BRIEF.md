@@ -1,9 +1,13 @@
 # Build Prompt v3: Windows Usage Widget (paste-token, multi-account)
 
-> **Status:** Revised from v2 after a development-readiness review. Changes in v3 are about
-> de-risking the one thing the whole product hinges on (a real, captured usage request) and
-> closing the gaps that would otherwise cause mid-build churn. See **§0 Readiness & sequencing**
-> first — it is the most important section.
+> **Status:** Revised from v2 after a development-readiness review, then tightened (v3.1) on a
+> second review pass. v3 de-risks the one thing the whole product hinges on (a real, captured usage
+> request) and closes the gaps that would otherwise cause mid-build churn. v3.1 adds the
+> safety/operational guardrails for the highest-risk part — replaying full browser headers:
+> canonical fixture format (§0), credential-injection-after-allowlist + redirects-off (contract #4),
+> validate-before-save (§4), stable credential key naming and secret-free export (account mgmt /
+> packaging), first-run empty state (UI), and a merge-gating fixture-safety test (§12). See
+> **§0 Readiness & sequencing** first — it is the most important section.
 
 Paste this into Claude Code as the project brief.
 
@@ -28,6 +32,16 @@ provider** and commit them as redacted test fixtures:
 Commit these (secrets stripped, structure intact) to `tests/fixtures/`. They become both the source
 of truth for the JSON mappings **and** the input to the offline parser tests (§12). Until they
 exist, ship the default templates with `FILL ME IN` markers and treat the live path as unproven.
+
+**Fixture format.** Raw HAR/cURL files are *reference artifacts only* — keep them under
+`tests/fixtures/raw/` if useful, but tests must not parse HAR. Normalize each capture into a
+canonical pair the test harness consumes directly:
+
+- `request.json` — `method`, `url`, `headers` (with `{{TOKEN}}` placeholders), `body`,
+  `allowedHosts`, and the `mappings` config.
+- `response.json` (and/or `response-headers.json`) — the redacted provider response.
+
+This keeps the harness a simple fixture loader, not a HAR-parser project.
 
 ### Track A — buildable now, against fixtures (no live endpoint needed)
 
@@ -109,6 +123,14 @@ These are hard requirements, not suggestions:
 4. **Hostname allowlist per adapter, fail closed.** Each adapter declares an explicit list of
    allowed hostnames; any request to a hostname outside that list must fail rather than proceed.
    This is unit-tested (§12).
+   - **Inject credentials only after the allowlist passes.** `Cookie` and `Authorization` headers
+     (and any `{{TOKEN}}` injection) may be added only after the *final* request URL's hostname has
+     cleared the allowlist — never before. Replaying full browser headers is the highest-risk part
+     of the architecture; this rule prevents a copied cookie leaking to the wrong host if a URL is
+     edited.
+   - **Redirects disabled by default.** Automatic redirect-following is off. If a template enables
+     redirects, every redirect target must re-pass the same hostname allowlist before any
+     credential-bearing request is sent to it.
 5. **Per-account failure isolation.** A failed, expired, or slow account must never block or delay
    refreshes for any other account. Each refresh runs with an independent timeout (default **10s**)
    and its own `CancellationToken`.
@@ -188,6 +210,11 @@ the account override if present, else the source-type default.
 migrate older versions forward and back up the prior file (`adapter-config.<version>.bak`). Never
 silently break a hand-edited config on upgrade.
 
+**Validate before save.** The editor refuses to save a template until: the URL parses; its hostname
+is in the allowlist; the HTTP method is supported; mappings are syntactically valid JSONPath/header
+references; `{{TOKEN}}` placeholders appear only in approved auth/header fields; and no real token
+value is present anywhere in the template (placeholder only).
+
 ## 5. Getting the data (no official API — replay the browser's own request)
 
 1. **Claude (primary):** replay the request claude.ai's Settings → Usage page makes.
@@ -216,11 +243,17 @@ copy blindly): `Zrnik/claude-usage-windows-taskbar-widget`,
 - Support an arbitrary number of accounts (4 Claude now, design for more).
 - Each account = one row: label, service icon (C for Claude, X for Codex), two bars, countdowns.
 - Reorder and delete accounts; deleting wipes the token from Credential Manager.
+- **Credential key naming.** Entries are keyed by a stable internal account ID, not the nickname:
+  `UsageWidget/{accountId}/{sourceType}`. Renaming an account must never create a new entry or
+  orphan the old one.
 - **Expired-token detection:** an `Unauthorized` result puts that row in an error state with a
   "re-paste token" button; never fail silently or take down the widget.
 
 ## UI / behavior
 
+- **First run / empty state.** With no accounts configured, show an empty state offering *Add
+  account*, *Open template editor*, and README/help links. No background polling starts until at
+  least one account exists.
 - **Tray icon** shows the **highest current-session %** across accounts, color-coded: green < 75%,
   orange 75–90%, red ≥ 90%. *(Note: rendering live % text into a 16/32px icon means GDI-drawing the
   glyph and swapping `NotifyIcon` on each update — account for DPI scaling. Non-trivial; budget for
@@ -249,7 +282,11 @@ copy blindly): `Zrnik/claude-usage-windows-taskbar-widget`,
 - Single self-contained portable `.exe` (x64 and ARM64); runs without admin.
 - Start minimized to tray; optional auto-start via the registry Run key or Startup folder.
 - Single-instance enforcement (see contract #9).
-- Graceful credential cleanup when an account is deleted or the app is uninstalled.
+- **Credential cleanup** when an account is deleted. (A portable `.exe` can't reliably detect its
+  own "uninstall," so don't promise cleanup there.) *If* an installer is added later, its uninstall
+  step should offer to remove all `UsageWidget/*` Credential Manager entries.
+- **Export/import excludes secrets.** Settings backup/restore covers adapter config and account
+  metadata only; tokens are never exported — they must be re-pasted or re-linked after import.
 - Note WPF single-file/self-contained caveats per arch; verify the ARM64 build separately.
 
 ## 12. Testing strategy (offline, CI-able)
@@ -267,6 +304,8 @@ needs **zero network** and runs in CI:
 - **Error taxonomy:** map representative responses (401, 429, timeout, challenge HTML, 200-but-
   unmapped) to the correct enum value.
 - **Config migration:** load an older `schemaVersion` and assert forward migration + backup.
+- **Fixture safety (merge-gating):** the suite fails if any committed fixture contains an obvious
+  bearer token, cookie, session ID, refresh token, email, or org/account ID.
 
 ## Stretch goals (after core works)
 
@@ -288,6 +327,7 @@ needs **zero network** and runs in CI:
 - Hostname allowlist fails closed for non-allowlisted hosts.
 - Error taxonomy classifies 401 / 429 / timeout / challenge / 200-unmapped correctly.
 - Config migrates an older `schemaVersion` and backs up the prior file.
+- Fixture-safety test fails the build if a committed fixture contains a secret or identifier.
 - App is single-instance and starts minimized to tray when launched at Windows startup.
 
 **Live (needs accounts + captured endpoints) — gates the product:**
