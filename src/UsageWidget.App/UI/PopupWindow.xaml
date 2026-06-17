@@ -10,16 +10,17 @@
     <Border Background="{StaticResource PanelBrush}" CornerRadius="10" Padding="12">
         <StackPanel>
             <!-- Empty state (v3.1): no accounts => no polling, offer the next actions. -->
-            <StackPanel Visibility="{Binding IsEmpty, Converter={x:Static ui:BoolToVisibility.Instance}}">
+            <StackPanel x:Name="EmptyState"
+                        Visibility="{Binding IsEmpty, Converter={x:Static ui:BoolToVisibility.Instance}}">
                 <TextBlock Text="No accounts yet" Foreground="White" FontSize="15" FontWeight="SemiBold" />
                 <TextBlock Text="Add an account to start tracking usage."
                            Foreground="#AAAAAA" Margin="0,4,0,10" TextWrapping="Wrap" />
-                <Button Content="Add account…" Margin="0,2" />
-                <Button Content="Open Request Template editor…" Margin="0,2" />
-                <Button Content="README / Help" Margin="0,2" />
+                <Button Content="Add account…" Margin="0,2" Padding="8,4" Click="OnAddAccountClick" />
+                <Button Content="Endpoint setup (Request Template)…" Margin="0,2" Padding="8,4" Click="OnOpenEditorClick" />
+                <Button Content="Open config folder" Margin="0,2" Padding="8,4" Click="OnOpenHelpClick" />
             </StackPanel>
 
-            <ItemsControl ItemsSource="{Binding Rows}"
+            <ItemsControl x:Name="RowsList" ItemsSource="{Binding Rows}"
                           Visibility="{Binding IsEmpty, Converter={x:Static ui:BoolToVisibility.InverseInstance}}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type ui:AccountRowViewModel}">
@@ -53,7 +54,8 @@
                                 <!-- Per-row state / re-paste prompt -->
                                 <DockPanel Margin="0,4,0,0"
                                            Visibility="{Binding NeedsRepaste, Converter={x:Static ui:BoolToVisibility.Instance}}">
-                                    <Button Content="Re-paste token" DockPanel.Dock="Right" />
+                                    <Button Content="Re-paste token" DockPanel.Dock="Right" Padding="6,2"
+                                            Click="OnRepasteClick" />
                                     <TextBlock Text="{Binding StateMessage}" Foreground="#E0A0A0"
                                                FontSize="10" VerticalAlignment="Center" TextWrapping="Wrap" />
                                 </DockPanel>
@@ -62,6 +64,13 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+
+            <!-- Footer actions (when accounts exist) -->
+            <DockPanel Margin="0,8,0,0"
+                       Visibility="{Binding IsEmpty, Converter={x:Static ui:BoolToVisibility.InverseInstance}}">
+                <Button Content="+ Add account" Padding="8,4" Click="OnAddAccountClick" />
+                <Button Content="Endpoint setup" Padding="8,4" Margin="6,0,0,0" Click="OnOpenEditorClick" />
+            </DockPanel>
         </StackPanel>
     </Border>
 </Window>

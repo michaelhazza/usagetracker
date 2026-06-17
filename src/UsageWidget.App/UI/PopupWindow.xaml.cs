@@ -6,10 +6,29 @@ namespace UsageWidget.App.UI;
 
 public partial class PopupWindow : Window
 {
+    public event Action<AccountRowViewModel>? RepasteRequested;
+    public event Action? AddAccountRequested;
+    public event Action? OpenEditorRequested;
+    public event Action? OpenHelpRequested;
+
     public PopupWindow() => InitializeComponent();
 
     // Hide (not close) when focus is lost, so the tray popup behaves like a flyout.
     private void OnDeactivated(object? sender, EventArgs e) => Hide();
+
+    private void OnAddAccountClick(object sender, RoutedEventArgs e) => AddAccountRequested?.Invoke();
+
+    private void OnOpenEditorClick(object sender, RoutedEventArgs e) => OpenEditorRequested?.Invoke();
+
+    private void OnOpenHelpClick(object sender, RoutedEventArgs e) => OpenHelpRequested?.Invoke();
+
+    private void OnRepasteClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: AccountRowViewModel row })
+        {
+            RepasteRequested?.Invoke(row);
+        }
+    }
 }
 
 /// <summary>Minimal bool→Visibility converter exposed as static instances for XAML x:Static use.</summary>

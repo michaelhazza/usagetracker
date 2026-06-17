@@ -1,11 +1,18 @@
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using UsageWidget.App.Services;
 using UsageWidget.App.Tray;
 using UsageWidget.App.UI;
+using UsageWidget.Core.Accounts;
 using UsageWidget.Core.Config;
 using UsageWidget.Core.Model;
 using UsageWidget.Core.Net;
 using UsageWidget.Core.Secrets;
+
+// Both WPF and WinForms are enabled (WinForms only for the tray NotifyIcon). Disambiguate
+// 'Application' so the WPF one wins in this file.
+using Application = System.Windows.Application;
 
 namespace UsageWidget.App;
 
@@ -17,6 +24,7 @@ public partial class App : Application
     private HttpClientSender? _sender;
     private PopupWindow? _popup;
     private MainViewModel? _vm;
+    private WindowsCredentialManagerStore? _secrets;
 
     private readonly ConfigStore _configStore = new(ConfigStore.DefaultPath());
     private AdapterConfig _config = new();
@@ -38,18 +46,24 @@ public partial class App : Application
 
         _config = LoadOrSeedConfig();
 
-        var secrets = new WindowsCredentialManagerStore();
+        _secrets = new WindowsCredentialManagerStore();
         _sender = new HttpClientSender();
         var factory = new AdapterFactory(_config.Polling);
-        var refresher = new AccountRefresher(factory, secrets, _sender);
+        var refresher = new AccountRefresher(factory, _secrets, _sender);
 
         _vm = new MainViewModel();
         _vm.Sync(_config.Accounts);
         _popup = new PopupWindow { DataContext = _vm };
+        _popup.RepasteRequested += OnRepasteRequested;
+        _popup.AddAccountRequested += OnAddAccount;
+        _popup.OpenEditorRequested += OnOpenTemplateEditor;
+        _popup.OpenHelpRequested += OnOpenHelp;
 
         _tray = new TrayService();
         _tray.OnLeftClick += ShowPopup;
         _tray.OnRefreshNow += async () => await _loop!.RefreshNowAsync();
+        _tray.OnAddAccount += OnAddAccount;
+        _tray.OnSettings += OnOpenTemplateEditor;
         _tray.OnQuit += Shutdown;
         _tray.SetSeverity(null, null);
 
@@ -87,6 +101,50 @@ public partial class App : Application
                 TrayStatus.WorstSessionPct(results.Values),
                 TrayStatus.OverallSeverity(results.Values));
         });
+    }
+
+    private void OnAddAccount()
+    {
+        var dialog = new AddAccountWindow(_config);
+        if (dialog.ShowDialog() != true || dialog.Result is null) return;
+
+        var (account, secret) = dialog.Result.Value;
+        _secrets!.Set(account.Id, account.Source, secret);
+        account.Order = _config.Accounts.Count;
+        _config.Accounts.Add(account);
+        _configStore.Save(_config);
+
+        _vm!.Sync(_config.Accounts);
+        _ = _loop!.RefreshNowAsync();
+    }
+
+    private void OnRepasteRequested(AccountRowViewModel row)
+    {
+        var newToken = TokenPromptWindow.Prompt(row.Label);
+        if (string.IsNullOrEmpty(newToken)) return;
+
+        _secrets!.Set(row.Account.Id, row.Account.Source, newToken);
+        _ = _loop!.RefreshNowAsync();
+    }
+
+    private void OnOpenTemplateEditor()
+    {
+        var editor = new TemplateEditorWindow(_config);
+        if (editor.ShowDialog() == true)
+        {
+            _configStore.Save(_config);
+            _ = _loop!.RefreshNowAsync();
+        }
+    }
+
+    private void OnOpenHelp()
+    {
+        var path = ConfigStore.DefaultPath();
+        var folder = Path.GetDirectoryName(path);
+        if (folder is not null && Directory.Exists(folder))
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", folder) { UseShellExecute = true });
+        }
     }
 
     private void ShowPopup()
