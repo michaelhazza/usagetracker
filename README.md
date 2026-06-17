@@ -27,6 +27,21 @@ request into the Request Template editor (or `adapter-config.json`).
 
 ---
 
+## Quickest way to run it (no compiling)
+
+Every push builds the portable `.exe` on a Windows runner and attaches it to the CI run:
+
+1. Go to the repo on GitHub → **Actions** tab → click the latest green **CI** run.
+2. Scroll to **Artifacts** → download **`UsageWidget-portable`** (a zip).
+3. Unzip it. Inside, open the **`win-x64`** folder (use `win-arm64` only on an ARM PC).
+4. Double-click **`UsageWidget.exe`**. A widget icon appears in your system tray (bottom-right,
+   near the clock — click the `^` to find it). No install, no admin.
+   - First launch may show "Windows protected your PC" (unsigned app) → **More info → Run anyway**.
+
+Then jump to [Adding your accounts](#adding-your-accounts).
+
+---
+
 ## Project layout
 
 ```
@@ -134,13 +149,23 @@ supported, mappings valid, `{{TOKEN}}` only in auth fields, no real secret prese
 
 ---
 
-## Adding / removing accounts
+## Adding your accounts
 
-- **Add:** tray → *Add account* → pick source type → paste token (or point to `auth.json`) →
-  optional nickname. Validation is **by successful parse**, not identity.
-- **Reorder / delete:** deleting wipes the token from Credential Manager.
-- **Expired token:** that row shows an error state with a **Re-paste token** button; other accounts
-  keep refreshing.
+The app walks you through this — every screen has the DevTools steps printed on it. The flow:
+
+1. **Left-click the tray icon** → the popup opens. First run shows **Add account** / **Endpoint
+   setup** buttons.
+2. **Endpoint setup (do this once per service):** click it, pick **Claude**, and fill in the
+   request the browser uses for the Usage page (the window shows exactly how to capture it). At
+   minimum: the **URL**, and the **Session %** / **Weekly %** / reset mappings. Save.
+3. **Add account (repeat for each of your 4 Claude logins):** click **+ Add account**, pick
+   **Claude**, paste the **token** (the value after `Bearer ` from the Authorization header, or the
+   Cookie value), give it a nickname, Save.
+4. The row turns into two live bars. Repeat for the other accounts. A **Re-paste token** button
+   appears on any row whose token has expired.
+
+Deleting an account wipes its token from Windows Credential Manager. Accounts are validated **by
+successful parse**, not identity.
 
 Credential Manager entries are keyed `UsageWidget/{accountId}/{sourceType}` (stable id, not nickname)
 so renaming never orphans a secret.
