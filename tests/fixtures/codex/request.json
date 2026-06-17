@@ -1,0 +1,19 @@
+{
+  "_comment": "Normalized fixture (v3 §0). REDACTED reference for tests — NOT a live capture.",
+  "method": "GET",
+  "url": "https://chatgpt.com/backend-api/codex/usage",
+  "headers": {
+    "Authorization": "Bearer {{TOKEN}}",
+    "Accept": "application/json"
+  },
+  "allowedHosts": ["chatgpt.com", ".chatgpt.com"],
+  "followRedirects": false,
+  "mappings": {
+    "SessionPct": "$.rate_limits.primary.used_percent",
+    "SessionReset": "$.rate_limits.primary.reset_after_seconds",
+    "SessionResetKind": "DurationSeconds",
+    "WeeklyPct": "$.rate_limits.secondary.used_percent",
+    "WeeklyReset": "$.rate_limits.secondary.reset_after_seconds",
+    "WeeklyResetKind": "DurationSeconds"
+  }
+}

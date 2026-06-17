@@ -1,0 +1,7 @@
+{
+  "_comment": "Anthropic API fallback returns unified utilization as RESPONSE HEADERS on a billed /v1/messages call. Opt-in only. Values redacted/synthetic.",
+  "anthropic-ratelimit-unified-5h-utilization": "55",
+  "anthropic-ratelimit-unified-5h-reset": "2026-06-17T21:30:00Z",
+  "anthropic-ratelimit-unified-7d-utilization": "12",
+  "anthropic-ratelimit-unified-7d-reset": "2026-06-24T00:00:00Z"
+}

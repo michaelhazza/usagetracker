@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Windows-only project (WPF + WinForms tray). It does NOT build on Linux/CI; the offline gate is
+    UsageWidget.Core + UsageWidget.Core.Tests. Build/publish this on Windows (see README).
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RootNamespace>UsageWidget.App</RootNamespace>
+    <AssemblyName>UsageWidget</AssemblyName>
+
+    <!-- Portable, self-contained, no admin. Set RID at publish time (win-x64 / win-arm64). -->
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\UsageWidget.Core\UsageWidget.Core.csproj" />
+  </ItemGroup>
+
+</Project>

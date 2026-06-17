@@ -1,0 +1,67 @@
+<Window x:Class="UsageWidget.App.UI.PopupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="clr-namespace:UsageWidget.App.UI"
+        Title="Usage Widget"
+        Width="360" SizeToContent="Height"
+        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
+        Background="Transparent" ShowInTaskbar="False" Topmost="True"
+        Deactivated="OnDeactivated">
+    <Border Background="{StaticResource PanelBrush}" CornerRadius="10" Padding="12">
+        <StackPanel>
+            <!-- Empty state (v3.1): no accounts => no polling, offer the next actions. -->
+            <StackPanel Visibility="{Binding IsEmpty, Converter={x:Static ui:BoolToVisibility.Instance}}">
+                <TextBlock Text="No accounts yet" Foreground="White" FontSize="15" FontWeight="SemiBold" />
+                <TextBlock Text="Add an account to start tracking usage."
+                           Foreground="#AAAAAA" Margin="0,4,0,10" TextWrapping="Wrap" />
+                <Button Content="Add account…" Margin="0,2" />
+                <Button Content="Open Request Template editor…" Margin="0,2" />
+                <Button Content="README / Help" Margin="0,2" />
+            </StackPanel>
+
+            <ItemsControl ItemsSource="{Binding Rows}"
+                          Visibility="{Binding IsEmpty, Converter={x:Static ui:BoolToVisibility.InverseInstance}}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type ui:AccountRowViewModel}">
+                        <Border Margin="0,4" Padding="8" Background="#262626" CornerRadius="6">
+                            <StackPanel>
+                                <DockPanel>
+                                    <Border Width="20" Height="20" CornerRadius="10" Background="#444"
+                                            DockPanel.Dock="Left" Margin="0,0,8,0">
+                                        <TextBlock Text="{Binding ServiceGlyph}" Foreground="White"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <TextBlock Text="{Binding Label}" Foreground="White" FontWeight="SemiBold" />
+                                </DockPanel>
+
+                                <!-- Session bar -->
+                                <Grid Margin="0,6,0,0">
+                                    <ProgressBar Height="10" Minimum="0" Maximum="100"
+                                                 Value="{Binding SessionPct, Mode=OneWay}" />
+                                    <TextBlock Text="{Binding SessionCountdown}" Foreground="#DDDDDD"
+                                               FontSize="10" HorizontalAlignment="Right" />
+                                </Grid>
+
+                                <!-- Weekly bar -->
+                                <Grid Margin="0,4,0,0">
+                                    <ProgressBar Height="10" Minimum="0" Maximum="100"
+                                                 Value="{Binding WeeklyPct, Mode=OneWay}" />
+                                    <TextBlock Text="{Binding WeeklyCountdown}" Foreground="#DDDDDD"
+                                               FontSize="10" HorizontalAlignment="Right" />
+                                </Grid>
+
+                                <!-- Per-row state / re-paste prompt -->
+                                <DockPanel Margin="0,4,0,0"
+                                           Visibility="{Binding NeedsRepaste, Converter={x:Static ui:BoolToVisibility.Instance}}">
+                                    <Button Content="Re-paste token" DockPanel.Dock="Right" />
+                                    <TextBlock Text="{Binding StateMessage}" Foreground="#E0A0A0"
+                                               FontSize="10" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                </DockPanel>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </Border>
+</Window>

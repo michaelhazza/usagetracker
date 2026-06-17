@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  # Offline gate (v3 §12): the cross-platform Core + tests build and run on Linux with no live
+  # accounts and no network. This is the merge-gating suite.
+  offline-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build Core
+        run: dotnet build src/UsageWidget.Core/UsageWidget.Core.csproj -c Release
+      - name: Run offline tests
+        run: dotnet test tests/UsageWidget.Core.Tests/UsageWidget.Core.Tests.csproj -c Release
+
+  # The WPF app builds only on Windows. This also produces the portable single-file exe artifacts.
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build solution
+        run: dotnet build UsageWidget.sln -c Release
+      - name: Publish portable x64
+        run: dotnet publish src/UsageWidget.App/UsageWidget.App.csproj -c Release -r win-x64 --self-contained -o publish/win-x64
+      - name: Publish portable arm64
+        run: dotnet publish src/UsageWidget.App/UsageWidget.App.csproj -c Release -r win-arm64 --self-contained -o publish/win-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UsageWidget-portable
+          path: publish/**/UsageWidget.exe

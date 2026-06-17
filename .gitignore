@@ -1,0 +1,17 @@
+# .NET build output
+bin/
+obj/
+publish/
+*.user
+
+# Rider / VS
+.idea/
+.vs/
+
+# Local secrets must NEVER be committed (they belong in Credential Manager, not the repo)
+*.secret
+adapter-config.local.json
+
+# OS
+.DS_Store
+Thumbs.db

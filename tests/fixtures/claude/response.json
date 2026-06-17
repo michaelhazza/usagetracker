@@ -1,0 +1,14 @@
+{
+  "_comment": "REDACTED synthetic response shaped like the Claude Usage payload. Replace field paths once the real capture is in hand.",
+  "five_hour": {
+    "utilization": 42.5,
+    "resets_at": "2026-06-17T20:00:00Z"
+  },
+  "seven_day": {
+    "utilization": 88.0,
+    "resets_at": "2026-06-22T00:00:00Z"
+  },
+  "account": {
+    "email": "demo-user@example.com"
+  }
+}

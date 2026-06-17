@@ -1,0 +1,20 @@
+{
+  "_comment": "Normalized fixture (v3 §0). REDACTED reference for tests — NOT a live capture. Raw HAR/cURL would live under tests/fixtures/raw/.",
+  "method": "GET",
+  "url": "https://claude.ai/api/organizations/REDACTED_ORG/usage",
+  "headers": {
+    "Authorization": "Bearer {{TOKEN}}",
+    "Cookie": "{{TOKEN}}",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ReplayedExactlyFromCapture",
+    "Accept": "application/json"
+  },
+  "allowedHosts": ["claude.ai", ".claude.ai"],
+  "followRedirects": false,
+  "mappings": {
+    "SessionPct": "$.five_hour.utilization",
+    "SessionReset": "$.five_hour.resets_at",
+    "WeeklyPct": "$.seven_day.utilization",
+    "WeeklyReset": "$.seven_day.resets_at",
+    "Identity": "$.account.email"
+  }
+}
