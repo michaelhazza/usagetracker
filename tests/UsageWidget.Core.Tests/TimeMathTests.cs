@@ -75,6 +75,17 @@ public class TimeMathTests
     }
 
     [Fact]
+    public void Reset_label_remaining_is_offset_aware()
+    {
+        // now is 10:00 at +05:00 (= 05:00 UTC); reset is 05:30 UTC => 30 minutes out regardless of
+        // the differing offsets. Locks the offset-aware subtraction (the absolute render is machine-
+        // local-tz dependent, so only the relative form is asserted cross-machine).
+        var now = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.FromHours(5));
+        var resetUtc = new DateTimeOffset(2026, 1, 1, 5, 30, 0, TimeSpan.Zero);
+        Assert.Equal("Resets in 30 min", TimeMath.FormatResetLabel(resetUtc, now));
+    }
+
+    [Fact]
     public void Reset_label_uses_absolute_form_beyond_a_day()
     {
         var now = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);

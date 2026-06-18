@@ -83,7 +83,7 @@ public partial class App : Application
 
         _tray = new TrayService();
         _tray.OnLeftClick += ShowPopup;
-        _tray.OnRefreshNow += async () => await _loop!.RefreshNowAsync();
+        _tray.OnRefreshNow += () => FireAndLogRefresh("tray-refresh");
         _tray.OnAddAccount += OnAddAccount;
         _tray.OnSettings += OnOpenTemplateEditor;
         _tray.OnQuit += Shutdown;
@@ -150,8 +150,10 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            // Don't leave a half-added account in memory if persisting the secret/config failed.
+            // Don't leave a half-added account in memory if persisting the secret/config failed, and
+            // clean up the secret blob so a failed add doesn't leak a stored login.
             _config.Accounts.RemoveAll(a => a.Id == account.Id);
+            try { _secrets!.Delete(account.Id, account.Source); } catch { /* best-effort */ }
             Log("save-account", ex);
             return "Couldn't save the account: " + Redactor.Redact(ex.Message);
         }
@@ -181,8 +183,15 @@ public partial class App : Application
     private void OnMoveAccount(AccountRowViewModel row, int delta)
     {
         if (!_vm!.Move(row, delta)) return;
-        try { _configStore.Save(_config); }
-        catch (Exception ex) { Log("save-order", ex); }
+        try
+        {
+            _configStore.Save(_config);
+        }
+        catch (Exception ex)
+        {
+            Log("save-order", ex);
+            _vm.Move(row, -delta); // keep the visible order matching what's actually persisted
+        }
     }
 
     private void OnManageAccount(AccountRowViewModel row)
@@ -235,13 +244,21 @@ public partial class App : Application
             catch (Exception ex)
             {
                 Log("manage-secret", ex);
-                return "Renamed, but couldn't store the new login: " + Redactor.Redact(ex.Message);
+
+                // The saved config now points at a new template with no matching secret. Roll the
+                // template back to the prior (working) login so the account isn't left broken; keep
+                // the rename. If re-saving the rollback also fails, surface that it may need re-pasting.
+                account.Template = oldTemplate;
+                try { _configStore.Save(_config); }
+                catch (Exception rollbackEx) { Log("manage-secret-rollback", rollbackEx); }
+
+                UpdateRowLabel(account);
+                return "Name saved, but the login refresh failed — please re-paste again: "
+                    + Redactor.Redact(ex.Message);
             }
         }
 
-        // Reflect the new name immediately without rebuilding the list (keeps live bars/order).
-        var existing = _vm!.Rows.FirstOrDefault(r => r.Account.Id == account.Id);
-        if (existing is not null) existing.Label = account.DisplayLabel(null);
+        UpdateRowLabel(account);
 
         try { await _loop!.RefreshNowAsync(); }
         catch (Exception ex) { Log("manage-refresh", ex); }
@@ -280,6 +297,19 @@ public partial class App : Application
         catch (Exception ex) { Log("remove-secret", ex); }
     }
 
+    private void UpdateRowLabel(Account account)
+    {
+        var row = _vm!.Rows.FirstOrDefault(r => r.Account.Id == account.Id);
+        if (row is not null) row.Label = account.DisplayLabel(null);
+    }
+
+    /// <summary>Trigger a refresh without awaiting, but still observe + log any failure.</summary>
+    private async void FireAndLogRefresh(string context)
+    {
+        try { await _loop!.RefreshNowAsync(); }
+        catch (Exception ex) { Log(context, ex); }
+    }
+
     /// <summary>Best-effort redacted log to %APPDATA%\UsageWidget\log.txt for post-hoc diagnosis.</summary>
     private static void Log(string context, Exception ex)
     {
@@ -300,7 +330,7 @@ public partial class App : Application
         if (string.IsNullOrEmpty(newToken)) return;
 
         _secrets!.Set(row.Account.Id, row.Account.Source, newToken);
-        _ = _loop!.RefreshNowAsync();
+        FireAndLogRefresh("repaste-refresh");
     }
 
     private void OnOpenTemplateEditor()
@@ -309,7 +339,7 @@ public partial class App : Application
         if (editor.ShowDialog() == true)
         {
             _configStore.Save(_config);
-            _ = _loop!.RefreshNowAsync();
+            FireAndLogRefresh("editor-refresh");
         }
     }
 
