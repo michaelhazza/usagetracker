@@ -103,9 +103,20 @@ public sealed class MappingEngine
         {
             null => null,
             JTokenType.Null => null,
+            // Newtonsoft auto-parses ISO timestamps into Date tokens, and JValue.ToString() renders
+            // them in the CURRENT culture (e.g. dd/MM/yyyy) — which the invariant timestamp parser
+            // then can't read, so resets silently came back null on non-US locales. Emit ISO 8601.
+            JTokenType.Date => FormatIsoDate(token),
             _ => token.ToString(),
         };
     }
+
+    private static string FormatIsoDate(JToken token) => ((JValue)token).Value switch
+    {
+        DateTimeOffset dto => dto.ToString("o", CultureInfo.InvariantCulture),
+        DateTime dt => dt.ToString("o", CultureInfo.InvariantCulture),
+        _ => token.ToString(),
+    };
 
     private static long? ReadLong(
         JToken root, IReadOnlyDictionary<string, string> headers, string? path)

@@ -28,7 +28,15 @@
                  AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" />
 
         <TextBlock x:Name="ErrorText" Foreground="#E08A8A" Margin="0,8,0,0"
-                   TextWrapping="Wrap" Visibility="Collapsed" />
+                   FontWeight="SemiBold" TextWrapping="Wrap" Visibility="Collapsed" />
+
+        <!-- Live feedback while saving + checking the token, so Save never looks like it did nothing. -->
+        <StackPanel x:Name="StatusPanel" Orientation="Horizontal" Margin="0,8,0,0" Visibility="Collapsed">
+            <ProgressBar x:Name="Progress" IsIndeterminate="True" Width="140" Height="6"
+                         VerticalAlignment="Center" />
+            <TextBlock x:Name="StatusText" Foreground="#CFCFCF" Margin="10,0,0,0"
+                       VerticalAlignment="Center" />
+        </StackPanel>
 
         <DockPanel Margin="0,16,0,0" LastChildFill="False">
             <Button x:Name="CancelButton" Content="Cancel" Width="90" Padding="6,4"

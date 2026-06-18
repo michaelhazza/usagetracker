@@ -6,6 +6,7 @@ using UsageWidget.App.Tray;
 using UsageWidget.App.UI;
 using UsageWidget.Core.Accounts;
 using UsageWidget.Core.Config;
+using UsageWidget.Core.Import;
 using UsageWidget.Core.Model;
 using UsageWidget.Core.Net;
 using UsageWidget.Core.Secrets;
@@ -68,6 +69,13 @@ public partial class App : Application
         _vm = new MainViewModel();
         _vm.Sync(_config.Accounts);
         _popup = new PopupWindow { DataContext = _vm };
+        _popup.RestorePosition(_config.Window);
+        _popup.RestorePinned(_config.Pinned);
+        _popup.BoundsChanged += OnBoundsChanged;
+        _popup.PinnedChanged += OnPinnedChanged;
+        _popup.MoveRequested += OnMoveAccount;
+        _popup.ManageRequested += OnManageAccount;
+        _popup.RemoveRequested += OnRemoveAccount;
         _popup.RepasteRequested += OnRepasteRequested;
         _popup.AddAccountRequested += OnAddAccount;
         _popup.OpenEditorRequested += OnOpenTemplateEditor;
@@ -119,26 +127,142 @@ public partial class App : Application
 
     private void OnAddAccount()
     {
-        var dialog = new AddAccountWindow(_config);
-        if (dialog.ShowDialog() != true || dialog.Result is null) return;
+        var dialog = new AddAccountWindow(_config, SaveAndCheckAccountAsync);
+        var saved = dialog.ShowDialog() == true;
 
+        // Show the popup so the freshly added row (with its live bars or a clear status) is visible.
+        if (saved) ShowPopup();
+    }
+
+    /// <summary>
+    /// Persists the account + secret, then runs one live refresh so the row shows real state right
+    /// away. Returns null on success, or a user-facing message the dialog displays inline.
+    /// </summary>
+    private async Task<string?> SaveAndCheckAccountAsync(Account account, string secret)
+    {
         try
         {
-            var (account, secret) = dialog.Result.Value;
             _secrets!.Set(account.Id, account.Source, secret);
             account.Order = _config.Accounts.Count;
             _config.Accounts.Add(account);
             _configStore.Save(_config);
-
             _vm!.Sync(_config.Accounts);
-            _ = _loop!.RefreshNowAsync();
         }
         catch (Exception ex)
         {
+            // Don't leave a half-added account in memory if persisting the secret/config failed.
+            _config.Accounts.RemoveAll(a => a.Id == account.Id);
+            Log("save-account", ex);
+            return "Couldn't save the account: " + Redactor.Redact(ex.Message);
+        }
+
+        // First live check. A failure here (bad token, Cloudflare, etc.) is NOT a save failure — the
+        // account is valid config, so keep it and let the row surface the reason.
+        try { await _loop!.RefreshNowAsync(); }
+        catch (Exception ex) { Log("first-refresh", ex); }
+
+        return null;
+    }
+
+    private void OnBoundsChanged(double left, double top, double width)
+    {
+        _config.Window = new WindowBounds { Left = left, Top = top, Width = width };
+        try { _configStore.Save(_config); }
+        catch (Exception ex) { Log("save-window-bounds", ex); }
+    }
+
+    private void OnPinnedChanged(bool pinned)
+    {
+        _config.Pinned = pinned;
+        try { _configStore.Save(_config); }
+        catch (Exception ex) { Log("save-pinned", ex); }
+    }
+
+    private void OnMoveAccount(AccountRowViewModel row, int delta)
+    {
+        if (!_vm!.Move(row, delta)) return;
+        try { _configStore.Save(_config); }
+        catch (Exception ex) { Log("save-order", ex); }
+    }
+
+    private void OnManageAccount(AccountRowViewModel row)
+    {
+        var dialog = new ManageAccountWindow(row.Account, ManageAccountAsync);
+        dialog.ShowDialog();
+        if (_config.Pinned) ShowPopup();
+    }
+
+    /// <summary>
+    /// Apply a rename and/or a re-pasted login from the Manage dialog. Returns null on success or a
+    /// user-facing error. The new cURL (if any) refreshes both the captured template and the secret.
+    /// </summary>
+    private async Task<string?> ManageAccountAsync(Account account, string? nickname, string? curl)
+    {
+        try
+        {
+            account.Nickname = string.IsNullOrWhiteSpace(nickname) ? null : nickname.Trim();
+
+            if (!string.IsNullOrWhiteSpace(curl))
+            {
+                var imported = CurlAccountImport.Build(curl, account.Source);
+                account.Template = imported.Template;
+                _secrets!.Set(account.Id, account.Source, imported.Secret);
+            }
+
+            _configStore.Save(_config);
+
+            // Reflect the new name immediately without rebuilding the list (keeps live bars/order).
+            var existing = _vm!.Rows.FirstOrDefault(r => r.Account.Id == account.Id);
+            if (existing is not null) existing.Label = account.DisplayLabel(null);
+        }
+        catch (Exception ex)
+        {
+            Log("manage-account", ex);
+            return "Couldn't update the account: " + Redactor.Redact(ex.Message);
+        }
+
+        try { await _loop!.RefreshNowAsync(); }
+        catch (Exception ex) { Log("manage-refresh", ex); }
+
+        return null;
+    }
+
+    private void OnRemoveAccount(AccountRowViewModel row)
+    {
+        var result = MessageBox.Show(
+            $"Remove \"{row.Label}\"? This deletes its stored login from this PC.",
+            "Usage Widget", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (result != MessageBoxResult.Yes) return;
+
+        try
+        {
+            _secrets!.Delete(row.Account.Id, row.Account.Source);
+            _config.Accounts.RemoveAll(a => a.Id == row.Account.Id);
+            for (var i = 0; i < _config.Accounts.Count; i++) _config.Accounts[i].Order = i;
+            _configStore.Save(_config);
+            _vm!.Sync(_config.Accounts);
+        }
+        catch (Exception ex)
+        {
+            Log("remove-account", ex);
             MessageBox.Show(
-                "Couldn't save the account: " + Redactor.Redact(ex.Message),
+                "Couldn't remove the account: " + Redactor.Redact(ex.Message),
                 "Usage Widget", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    /// <summary>Best-effort redacted log to %APPDATA%\UsageWidget\log.txt for post-hoc diagnosis.</summary>
+    private static void Log(string context, Exception ex)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(ConfigStore.DefaultPath());
+            if (dir is null) return;
+            Directory.CreateDirectory(dir);
+            var line = $"{DateTimeOffset.Now:O}\t{context}\t{Redactor.Redact(ex.ToString())}{Environment.NewLine}";
+            File.AppendAllText(Path.Combine(dir, "log.txt"), line);
+        }
+        catch { /* logging must never throw */ }
     }
 
     private void OnRepasteRequested(AccountRowViewModel row)
