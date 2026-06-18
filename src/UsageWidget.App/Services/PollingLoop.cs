@@ -28,11 +28,14 @@ public sealed class PollingLoop : IDisposable
 
     public void Start() => _ = RunAsync(_cts.Token);
 
-    /// <summary>Manual "Refresh now" — bypasses the cadence timer (safety controls still apply downstream).</summary>
-    public async Task RefreshNowAsync()
+    /// <summary>
+    /// Manual "Refresh now" — bypasses the cadence timer. When <paramref name="force"/> is true it also
+    /// bypasses per-account backoff (the header ↻); other safety controls still apply downstream.
+    /// </summary>
+    public async Task RefreshNowAsync(bool force = false)
     {
         var results = await _refresher
-            .RefreshAllAsync(_config(), DateTimeOffset.UtcNow, _cts.Token)
+            .RefreshAllAsync(_config(), DateTimeOffset.UtcNow, _cts.Token, force)
             .ConfigureAwait(false);
         OnResults?.Invoke(results);
     }

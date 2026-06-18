@@ -80,6 +80,7 @@ public partial class App : Application
         _popup.AddAccountRequested += OnAddAccount;
         _popup.OpenEditorRequested += OnOpenTemplateEditor;
         _popup.OpenHelpRequested += OnOpenHelp;
+        _popup.RefreshRequested += () => FireAndLogRefresh("popup-refresh", force: true);
 
         _tray = new TrayService();
         _tray.OnLeftClick += ShowPopup;
@@ -304,9 +305,9 @@ public partial class App : Application
     }
 
     /// <summary>Trigger a refresh without awaiting, but still observe + log any failure.</summary>
-    private async void FireAndLogRefresh(string context)
+    private async void FireAndLogRefresh(string context, bool force = false)
     {
-        try { await _loop!.RefreshNowAsync(); }
+        try { await _loop!.RefreshNowAsync(force); }
         catch (Exception ex) { Log(context, ex); }
     }
 

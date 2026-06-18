@@ -18,6 +18,10 @@ public partial class PopupWindow : Window
     public event Action? AddAccountRequested;
     public event Action? OpenEditorRequested;
     public event Action? OpenHelpRequested;
+
+    /// <summary>Raised when the user clicks the header refresh button — a forced refresh that
+    /// ignores any active backoff (the user is explicitly asking to retry now).</summary>
+    public event Action? RefreshRequested;
     public event Action<AccountRowViewModel, int>? MoveRequested;
 
     /// <summary>Raised with the final bounds (Left, Top, Width) whenever positioning/resizing ends.</summary>
@@ -143,6 +147,8 @@ public partial class PopupWindow : Window
     {
         if (sender is FrameworkElement { DataContext: AccountRowViewModel row }) handler?.Invoke(row);
     }
+
+    private void OnRefreshClick(object sender, RoutedEventArgs e) => RefreshRequested?.Invoke();
 
     private void OnTogglePin(object sender, RoutedEventArgs e)
     {
