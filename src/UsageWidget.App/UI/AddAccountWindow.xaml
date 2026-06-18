@@ -6,15 +6,9 @@
     <StackPanel Margin="16">
         <TextBlock Text="Add an account" Foreground="White" FontSize="18" FontWeight="SemiBold" />
 
-        <!-- The whole how-to, right on the screen -->
+        <!-- The whole how-to, right on the screen. Text is set per selected service in code-behind. -->
         <Border Background="#262626" CornerRadius="8" Padding="12" Margin="0,10,0,0">
-            <TextBlock Foreground="#CFCFCF" FontSize="12" TextWrapping="Wrap">
-                <Run Text="1. Open this account in your browser → claude.ai → Settings → Usage." /><LineBreak/>
-                <Run Text="2. Press F12 → click the Network tab → tick 'Fetch/XHR'." /><LineBreak/>
-                <Run Text="3. Click the little refresh circle on the Usage panel." /><LineBreak/>
-                <Run Text="4. Right-click the request named 'usage' → Copy → Copy as cURL." /><LineBreak/>
-                <Run Text="5. Paste it in the box below and click Save. That's it." />
-            </TextBlock>
+            <TextBlock x:Name="InstructionsText" Foreground="#CFCFCF" FontSize="12" TextWrapping="Wrap" />
         </Border>
 
         <TextBlock Text="Service" Foreground="#BBBBBB" Margin="0,12,0,2" />

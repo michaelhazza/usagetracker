@@ -27,8 +27,34 @@ public partial class AddAccountWindow : Window
             new SourceOption("Claude (web)", AccountSource.ClaudeWebToken),
             new SourceOption("Codex", AccountSource.CodexPastedToken),
         };
+        SourceCombo.SelectionChanged += (_, _) => UpdateInstructions();
         SourceCombo.SelectedIndex = 0;
+        UpdateInstructions();
     }
+
+    // Keep the how-to in step with the chosen service — the capture flow differs per provider.
+    private void UpdateInstructions()
+    {
+        if (InstructionsText is null) return;
+        var source = (SourceCombo.SelectedItem as SourceOption)?.Source ?? AccountSource.ClaudeWebToken;
+        InstructionsText.Text = InstructionsFor(source);
+    }
+
+    private static string InstructionsFor(AccountSource source) => source switch
+    {
+        AccountSource.CodexPastedToken =>
+            "1. Open this account in your browser → chatgpt.com/codex and sign in.\n" +
+            "2. Press F12 → click the Network tab → tick 'Fetch/XHR'.\n" +
+            "3. Reload the page so Codex loads your usage limits.\n" +
+            "4. Right-click the request named 'usage' → Copy → Copy as cURL.\n" +
+            "5. Paste it in the box below and click Save. That's it.",
+        _ =>
+            "1. Open this account in your browser → claude.ai → Settings → Usage.\n" +
+            "2. Press F12 → click the Network tab → tick 'Fetch/XHR'.\n" +
+            "3. Click the little refresh circle on the Usage panel.\n" +
+            "4. Right-click the request named 'usage' → Copy → Copy as cURL.\n" +
+            "5. Paste it in the box below and click Save. That's it.",
+    };
 
     private void OnCancel(object sender, RoutedEventArgs e)
     {
