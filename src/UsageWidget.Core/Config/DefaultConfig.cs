@@ -32,11 +32,11 @@ public static class DefaultConfig
             },
             Mappings = new MappingConfig
             {
-                SessionPct = "$.FILL_ME_IN.session.utilization",
-                SessionReset = "$.FILL_ME_IN.session.resets_at",
-                WeeklyPct = "$.FILL_ME_IN.weekly.utilization",
-                WeeklyReset = "$.FILL_ME_IN.weekly.resets_at",
-                Identity = "$.FILL_ME_IN.account.email",
+                // Verified against a live claude.ai /usage response.
+                SessionPct = "$.five_hour.utilization",
+                SessionReset = "$.five_hour.resets_at",
+                WeeklyPct = "$.seven_day.utilization",
+                WeeklyReset = "$.seven_day.resets_at",
             },
         };
 

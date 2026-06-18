@@ -4,11 +4,11 @@
         Title="Endpoint setup (Request Template)" Width="640" Height="720"
         WindowStartupLocation="CenterScreen" Background="#1E1E1E">
     <DockPanel Margin="16">
-        <TextBlock DockPanel.Dock="Top" Text="Endpoint setup" Foreground="White"
-                   FontSize="18" FontWeight="SemiBold" />
+        <TextBlock DockPanel.Dock="Top" Text="Endpoint setup (advanced — you usually don't need this)"
+                   Foreground="White" FontSize="18" FontWeight="SemiBold" />
         <TextBlock DockPanel.Dock="Top" Foreground="#AAAAAA" FontSize="12" Margin="0,4,0,10"
                    TextWrapping="Wrap"
-                   Text="Tell the app exactly which request to replay for each service. Capture it once: F12 → Network → refresh the Usage page → click the request whose Response JSON shows your usage. Copy the Request URL into 'URL', and the field locations into the mapping boxes (e.g. $.five_hour.utilization). Put {{TOKEN}} where your secret goes in the headers — the real token stays in Windows Credential Manager." />
+                   Text="Normally you just use 'Add account' and paste the Copy-as-cURL — everything below is filled in for you automatically. Only come here if Claude changes its usage page and the bars stop working. The defaults for Claude are already correct (five_hour / seven_day)." />
 
         <DockPanel DockPanel.Dock="Bottom" LastChildFill="False" Margin="0,10,0,0">
             <TextBlock x:Name="ValidationText" Foreground="#E08A8A" VerticalAlignment="Center"

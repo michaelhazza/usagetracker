@@ -1,28 +1,26 @@
 using System.Windows;
 using UsageWidget.Core.Accounts;
 using UsageWidget.Core.Config;
+using UsageWidget.Core.Import;
 
 namespace UsageWidget.App.UI;
 
 public partial class AddAccountWindow : Window
 {
-    private readonly AdapterConfig _config;
-
-    /// <summary>The created account + its secret, set only when the user saves successfully.</summary>
+    /// <summary>The created account (with its captured template) + its secret, set on save.</summary>
     public (Account Account, string Secret)? Result { get; private set; }
 
     private sealed record SourceOption(string Display, AccountSource Source);
 
     public AddAccountWindow(AdapterConfig config)
     {
-        _config = config;
+        _ = config;
         InitializeComponent();
 
         SourceCombo.ItemsSource = new[]
         {
-            new SourceOption("Claude (web token)", AccountSource.ClaudeWebToken),
-            new SourceOption("Codex (pasted token)", AccountSource.CodexPastedToken),
-            new SourceOption("Anthropic API key (advanced, opt-in)", AccountSource.AnthropicApiKey),
+            new SourceOption("Claude (web)", AccountSource.ClaudeWebToken),
+            new SourceOption("Codex", AccountSource.CodexPastedToken),
         };
         SourceCombo.SelectedIndex = 0;
     }
@@ -35,24 +33,33 @@ public partial class AddAccountWindow : Window
 
     private void OnSave(object sender, RoutedEventArgs e)
     {
-        var token = TokenBox.Text?.Trim() ?? "";
-        if (token.Length == 0)
+        var curl = CurlBox.Text?.Trim() ?? "";
+        if (curl.Length == 0)
         {
-            ShowError("Please paste your token first (see the steps on the right).");
+            ShowError("Paste the 'Copy as cURL' from DevTools first (steps above).");
             return;
         }
 
         var source = ((SourceOption)SourceCombo.SelectedItem).Source;
 
-        var account = new Account
+        try
         {
-            Source = source,
-            Nickname = string.IsNullOrWhiteSpace(NicknameBox.Text) ? null : NicknameBox.Text.Trim(),
-        };
+            var imported = CurlAccountImport.Build(curl, source);
+            var account = new Account
+            {
+                Source = source,
+                Nickname = string.IsNullOrWhiteSpace(NicknameBox.Text) ? null : NicknameBox.Text.Trim(),
+                Template = imported.Template,
+            };
 
-        Result = (account, token);
-        DialogResult = true;
-        Close();
+            Result = (account, imported.Secret);
+            DialogResult = true;
+            Close();
+        }
+        catch (Exception ex)
+        {
+            ShowError(ex.Message);
+        }
     }
 
     private void ShowError(string message)

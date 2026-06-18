@@ -47,7 +47,8 @@ public sealed class AccountRefresher
                 RefreshErrorKind.RateLimited, account.DisplayLabel(null), "In backoff.", now);
         }
 
-        var template = config.TemplateFor(account.Source);
+        // Prefer the account's own captured template (its org-specific URL); fall back to shared.
+        var template = account.Template ?? config.TemplateFor(account.Source);
         if (template is null || template.IsPlaceholder)
         {
             return UsageResult.Failure(

@@ -149,23 +149,24 @@ supported, mappings valid, `{{TOKEN}}` only in auth fields, no real secret prese
 
 ---
 
-## Adding your accounts
+## Adding your accounts (one paste each)
 
-The app walks you through this — every screen has the DevTools steps printed on it. The flow:
+No forms, no JSONPath. For each Claude account:
 
-1. **Left-click the tray icon** → the popup opens. First run shows **Add account** / **Endpoint
-   setup** buttons.
-2. **Endpoint setup (do this once per service):** click it, pick **Claude**, and fill in the
-   request the browser uses for the Usage page (the window shows exactly how to capture it). At
-   minimum: the **URL**, and the **Session %** / **Weekly %** / reset mappings. Save.
-3. **Add account (repeat for each of your 4 Claude logins):** click **+ Add account**, pick
-   **Claude**, paste the **token** (the value after `Bearer ` from the Authorization header, or the
-   Cookie value), give it a nickname, Save.
-4. The row turns into two live bars. Repeat for the other accounts. A **Re-paste token** button
-   appears on any row whose token has expired.
+1. Open that account → **claude.ai → Settings → Usage**.
+2. **F12 → Network tab → tick `Fetch/XHR`**, then click the **↻ refresh** circle on the Usage panel.
+3. Right-click the request named **`usage`** → **Copy → Copy as cURL**.
+4. In the widget: left-click the tray icon → **Add account** → paste it into the one box → nickname →
+   **Save**.
 
-Deleting an account wipes its token from Windows Credential Manager. Accounts are validated **by
-successful parse**, not identity.
+The app pulls the URL, headers, your cookie, and the number locations out of that paste
+automatically. The row turns into two live bars. Repeat for your other accounts.
+
+- A **Re-paste token** button appears on any row whose login has expired — same Copy-as-cURL, paste,
+  done.
+- Deleting an account wipes its cookie from Windows Credential Manager.
+- The **Advanced: endpoint setup** screen is only needed if Claude changes its usage page and the
+  bars stop working — the Claude defaults are already baked in.
 
 Credential Manager entries are keyed `UsageWidget/{accountId}/{sourceType}` (stable id, not nickname)
 so renaming never orphans a secret.
