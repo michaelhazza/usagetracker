@@ -31,17 +31,19 @@ public sealed class AccountRefresher
         _backoff.TryGetValue(accountId, out var b) ? b : _backoff[accountId] = new BackoffPolicy();
 
     public Task<IReadOnlyDictionary<string, UsageResult>> RefreshAllAsync(
-        AdapterConfig config, DateTimeOffset now, CancellationToken ct)
+        AdapterConfig config, DateTimeOffset now, CancellationToken ct, bool force = false)
     {
         return _coordinator.RefreshAllAsync(config.Accounts, (account, token) =>
-            RefreshOneAsync(account, config, now, token), now, ct);
+            RefreshOneAsync(account, config, now, token, force), now, ct);
     }
 
     private async Task<UsageResult> RefreshOneAsync(
-        Account account, AdapterConfig config, DateTimeOffset now, CancellationToken ct)
+        Account account, AdapterConfig config, DateTimeOffset now, CancellationToken ct, bool force = false)
     {
+        // Auto-poll skips accounts in backoff; a forced manual refresh (the header ↻) overrides it —
+        // the user is explicitly asking to retry now (v3.2 manual-refresh rule).
         var backoff = BackoffFor(account.Id);
-        if (backoff.IsInBackoff(now))
+        if (!RefreshCoordinator.MayManuallyRefresh(backoff, now, userConfirmed: force))
         {
             return UsageResult.Failure(
                 RefreshErrorKind.RateLimited, account.DisplayLabel(null), "In backoff.", now);

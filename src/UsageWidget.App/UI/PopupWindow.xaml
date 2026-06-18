@@ -17,6 +17,10 @@
                               Content="📌" FontSize="11" Padding="4,0" BorderThickness="0"
                               Background="Transparent" Foreground="#999999" Cursor="Hand"
                               ToolTip="Pin: keep on top and stop auto-hiding" />
+                <Button x:Name="RefreshButton" DockPanel.Dock="Right" Click="OnRefreshClick"
+                        Content="↻" FontSize="13" Padding="4,0" Margin="0,0,2,0" BorderThickness="0"
+                        Background="Transparent" Foreground="#999999" Cursor="Hand"
+                        ToolTip="Refresh now (ignores backoff)" />
                 <TextBlock Text="⠿  drag to move" Foreground="#666666" FontSize="10"
                            HorizontalAlignment="Center" VerticalAlignment="Center" />
             </DockPanel>

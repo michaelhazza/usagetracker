@@ -18,6 +18,10 @@ public partial class PopupWindow : Window
     public event Action? AddAccountRequested;
     public event Action? OpenEditorRequested;
     public event Action? OpenHelpRequested;
+
+    /// <summary>Raised when the user clicks the header refresh button — a forced refresh that
+    /// ignores any active backoff (the user is explicitly asking to retry now).</summary>
+    public event Action? RefreshRequested;
     public event Action<AccountRowViewModel, int>? MoveRequested;
 
     /// <summary>Raised with the final bounds (Left, Top, Width) whenever positioning/resizing ends.</summary>
@@ -142,6 +146,20 @@ public partial class PopupWindow : Window
     private static void RaiseRow(object sender, Action<AccountRowViewModel>? handler)
     {
         if (sender is FrameworkElement { DataContext: AccountRowViewModel row }) handler?.Invoke(row);
+    }
+
+    private void OnRefreshClick(object sender, RoutedEventArgs e) => RefreshRequested?.Invoke();
+
+    /// <summary>
+    /// Disable the header refresh button while a forced refresh is in flight. Forced refresh
+    /// intentionally bypasses backoff, so without this an impatient click-storm could stack
+    /// concurrent requests at a challenged/rate-limited endpoint — the disable bounds it to one
+    /// in-flight call at a time.
+    /// </summary>
+    public void SetRefreshing(bool refreshing)
+    {
+        RefreshButton.IsEnabled = !refreshing;
+        RefreshButton.Opacity = refreshing ? 0.4 : 1.0;
     }
 
     private void OnTogglePin(object sender, RoutedEventArgs e)

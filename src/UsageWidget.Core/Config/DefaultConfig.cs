@@ -53,11 +53,11 @@ public static class DefaultConfig
             },
             Mappings = new MappingConfig
             {
-                SessionPct = "$.FILL_ME_IN.primary.used_percent",
-                SessionReset = "$.FILL_ME_IN.primary.reset_after_seconds",
+                SessionPct = "$.rate_limit.primary_window.used_percent",
+                SessionReset = "$.rate_limit.primary_window.reset_after_seconds",
                 SessionResetKind = ResetKind.DurationSeconds,
-                WeeklyPct = "$.FILL_ME_IN.secondary.used_percent",
-                WeeklyReset = "$.FILL_ME_IN.secondary.reset_after_seconds",
+                WeeklyPct = "$.rate_limit.secondary_window.used_percent",
+                WeeklyReset = "$.rate_limit.secondary_window.reset_after_seconds",
                 WeeklyResetKind = ResetKind.DurationSeconds,
             },
         };

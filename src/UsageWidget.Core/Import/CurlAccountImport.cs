@@ -78,7 +78,8 @@ public static class CurlAccountImport
 
     /// <summary>
     /// Pre-baked field locations so the user never sees a JSONPath box. Claude's usage endpoint
-    /// returns five_hour / seven_day objects (verified against a live response).
+    /// returns five_hour / seven_day objects; Codex's backend-api/wham/usage returns a rate_limit
+    /// object with primary_window / secondary_window (both verified against live responses).
     /// </summary>
     private static MappingConfig MappingsFor(AccountSource source) => source switch
     {
@@ -90,6 +91,15 @@ public static class CurlAccountImport
             WeeklyPct = "$.seven_day.utilization",
             WeeklyReset = "$.seven_day.resets_at",
             WeeklyResetKind = ResetKind.Timestamp,
+        },
+        AccountSource.CodexPastedToken => new MappingConfig
+        {
+            SessionPct = "$.rate_limit.primary_window.used_percent",
+            SessionReset = "$.rate_limit.primary_window.reset_after_seconds",
+            SessionResetKind = ResetKind.DurationSeconds,
+            WeeklyPct = "$.rate_limit.secondary_window.used_percent",
+            WeeklyReset = "$.rate_limit.secondary_window.reset_after_seconds",
+            WeeklyResetKind = ResetKind.DurationSeconds,
         },
         _ => new MappingConfig(),
     };
