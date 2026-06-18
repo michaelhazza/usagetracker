@@ -43,6 +43,40 @@ public class CurlImportTests
     }
 
     [Fact]
+    public void Parses_real_cmd_style_with_escaped_quotes()
+    {
+        // Chrome "Copy as cURL (cmd)" wraps args in ^" and escapes inner quotes as \^".
+        const string realCmd =
+            "curl ^\"https://claude.ai/api/organizations/ORG/usage^\" ^\n" +
+            "  -H ^\"sec-ch-ua: ^\\^\"Brave^\\^\";v=^\\^\"149^\\^\"^\" ^\n" +
+            "  -b ^\"sessionKey=EXAMPLECOOKIEVALUE123; lastActiveOrg=ORG^\"";
+
+        var parsed = CurlParser.Parse(realCmd);
+
+        Assert.Equal("https://claude.ai/api/organizations/ORG/usage", parsed.Url);
+        Assert.Equal("sessionKey=EXAMPLECOOKIEVALUE123; lastActiveOrg=ORG", parsed.Headers["cookie"]);
+        Assert.Equal("\"Brave\";v=\"149\"", parsed.Headers["sec-ch-ua"]);
+    }
+
+    [Fact]
+    public void Import_uses_cookie_from_dash_b_flag_and_keeps_only_session_secret()
+    {
+        // Mirrors the real paste: cookie supplied via -b, lots of non-secret headers.
+        const string curl =
+            "curl 'https://claude.ai/api/organizations/ORG/usage' \\\n" +
+            "  -H 'content-type: application/json' \\\n" +
+            "  -H 'user-agent: Mozilla/5.0' \\\n" +
+            "  -b 'sessionKey=EXAMPLECOOKIEVALUE123; cf_clearance=ZZZ; lastActiveOrg=ORG'";
+
+        var imported = CurlAccountImport.Build(curl, AccountSource.ClaudeWebToken);
+
+        Assert.Contains("sessionKey=EXAMPLECOOKIEVALUE123", imported.Secret);
+        Assert.Equal(RequestTemplate.TokenPlaceholder, imported.Template.Headers["cookie"]);
+        Assert.Equal("Mozilla/5.0", imported.Template.Headers["user-agent"]);
+        Assert.True(TemplateValidator.Validate(imported.Template).IsValid);
+    }
+
+    [Fact]
     public void Import_extracts_secret_and_replaces_cookie_with_placeholder()
     {
         var imported = CurlAccountImport.Build(BashCurl, AccountSource.ClaudeWebToken);

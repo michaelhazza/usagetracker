@@ -95,10 +95,20 @@ public static class CurlParser
     private static string StripLineContinuations(string s)
     {
         // bash "\", cmd "^", PowerShell "`" at end of a line -> join lines.
-        return s
+        s = s
             .Replace("\\\r\n", " ").Replace("\\\n", " ")
             .Replace("^\r\n", " ").Replace("^\n", " ")
             .Replace("`\r\n", " ").Replace("`\n", " ");
+
+        // cmd-style "Copy as cURL (cmd)" wraps args in ^" and escapes inner quotes as \^".
+        // Once line-continuation carets are gone, the remaining carets are pure quote escaping —
+        // dropping them turns ^" into " and \^" into \", which the double-quote tokenizer handles.
+        if (s.Contains("^\"", StringComparison.Ordinal))
+        {
+            s = s.Replace("^", "");
+        }
+
+        return s;
     }
 
     private static List<string> Tokenize(string s)

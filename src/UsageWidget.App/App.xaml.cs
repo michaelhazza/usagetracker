@@ -9,10 +9,14 @@ using UsageWidget.Core.Config;
 using UsageWidget.Core.Model;
 using UsageWidget.Core.Net;
 using UsageWidget.Core.Secrets;
+using UsageWidget.Core.Security;
 
-// Both WPF and WinForms are enabled (WinForms only for the tray NotifyIcon). Disambiguate
-// 'Application' so the WPF one wins in this file.
+// Both WPF and WinForms are enabled (WinForms only for the tray NotifyIcon). Disambiguate the
+// types whose names collide so the WPF ones win in this file.
 using Application = System.Windows.Application;
+using MessageBox = System.Windows.MessageBox;
+using MessageBoxButton = System.Windows.MessageBoxButton;
+using MessageBoxImage = System.Windows.MessageBoxImage;
 
 namespace UsageWidget.App;
 
@@ -24,7 +28,7 @@ public partial class App : Application
     private HttpClientSender? _sender;
     private PopupWindow? _popup;
     private MainViewModel? _vm;
-    private WindowsCredentialManagerStore? _secrets;
+    private ISecretStore? _secrets;
 
     private readonly ConfigStore _configStore = new(ConfigStore.DefaultPath());
     private AdapterConfig _config = new();
@@ -44,9 +48,19 @@ public partial class App : Application
 
         _single.StartActivationListener(() => Dispatcher.Invoke(ShowPopup));
 
+        // Last-resort guard: surface errors instead of hard-crashing the widget.
+        DispatcherUnhandledException += (_, args) =>
+        {
+            MessageBox.Show(
+                Redactor.Redact(args.Exception.Message),
+                "Usage Widget", MessageBoxButton.OK, MessageBoxImage.Warning);
+            args.Handled = true;
+        };
+
         _config = LoadOrSeedConfig();
 
-        _secrets = new WindowsCredentialManagerStore();
+        // DPAPI-encrypted file store: handles large session cookies that exceed Credential Manager.
+        _secrets = new DpapiSecretStore();
         _sender = new HttpClientSender();
         var factory = new AdapterFactory(_config.Polling);
         var refresher = new AccountRefresher(factory, _secrets, _sender);
@@ -108,14 +122,23 @@ public partial class App : Application
         var dialog = new AddAccountWindow(_config);
         if (dialog.ShowDialog() != true || dialog.Result is null) return;
 
-        var (account, secret) = dialog.Result.Value;
-        _secrets!.Set(account.Id, account.Source, secret);
-        account.Order = _config.Accounts.Count;
-        _config.Accounts.Add(account);
-        _configStore.Save(_config);
+        try
+        {
+            var (account, secret) = dialog.Result.Value;
+            _secrets!.Set(account.Id, account.Source, secret);
+            account.Order = _config.Accounts.Count;
+            _config.Accounts.Add(account);
+            _configStore.Save(_config);
 
-        _vm!.Sync(_config.Accounts);
-        _ = _loop!.RefreshNowAsync();
+            _vm!.Sync(_config.Accounts);
+            _ = _loop!.RefreshNowAsync();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "Couldn't save the account: " + Redactor.Redact(ex.Message),
+                "Usage Widget", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private void OnRepasteRequested(AccountRowViewModel row)
