@@ -198,28 +198,50 @@ public partial class App : Application
     /// </summary>
     private async Task<string?> ManageAccountAsync(Account account, string? nickname, string? curl)
     {
+        var oldNickname = account.Nickname;
+        var oldTemplate = account.Template;
+        string? newSecret = null;
+
         try
         {
-            account.Nickname = string.IsNullOrWhiteSpace(nickname) ? null : nickname.Trim();
-
+            // Validate the new login (if any) and apply in-memory edits BEFORE persisting, so a bad
+            // cURL throws without mutating anything that's already saved.
             if (!string.IsNullOrWhiteSpace(curl))
             {
                 var imported = CurlAccountImport.Build(curl, account.Source);
                 account.Template = imported.Template;
-                _secrets!.Set(account.Id, account.Source, imported.Secret);
+                newSecret = imported.Secret;
             }
 
-            _configStore.Save(_config);
-
-            // Reflect the new name immediately without rebuilding the list (keeps live bars/order).
-            var existing = _vm!.Rows.FirstOrDefault(r => r.Account.Id == account.Id);
-            if (existing is not null) existing.Label = account.DisplayLabel(null);
+            account.Nickname = string.IsNullOrWhiteSpace(nickname) ? null : nickname.Trim();
+            _configStore.Save(_config); // durable config change first
         }
         catch (Exception ex)
         {
+            // Roll back the in-memory edits so the VM and disk can't diverge.
+            account.Nickname = oldNickname;
+            account.Template = oldTemplate;
             Log("manage-account", ex);
             return "Couldn't update the account: " + Redactor.Redact(ex.Message);
         }
+
+        // Config is saved; now store the refreshed secret (only after the durable change succeeded).
+        if (newSecret is not null)
+        {
+            try
+            {
+                _secrets!.Set(account.Id, account.Source, newSecret);
+            }
+            catch (Exception ex)
+            {
+                Log("manage-secret", ex);
+                return "Renamed, but couldn't store the new login: " + Redactor.Redact(ex.Message);
+            }
+        }
+
+        // Reflect the new name immediately without rebuilding the list (keeps live bars/order).
+        var existing = _vm!.Rows.FirstOrDefault(r => r.Account.Id == account.Id);
+        if (existing is not null) existing.Label = account.DisplayLabel(null);
 
         try { await _loop!.RefreshNowAsync(); }
         catch (Exception ex) { Log("manage-refresh", ex); }
@@ -236,7 +258,8 @@ public partial class App : Application
 
         try
         {
-            _secrets!.Delete(row.Account.Id, row.Account.Source);
+            // Durable config removal first, then update the UI — so a later secret-delete hiccup can't
+            // leave a visible row whose login is already gone.
             _config.Accounts.RemoveAll(a => a.Id == row.Account.Id);
             for (var i = 0; i < _config.Accounts.Count; i++) _config.Accounts[i].Order = i;
             _configStore.Save(_config);
@@ -248,7 +271,13 @@ public partial class App : Application
             MessageBox.Show(
                 "Couldn't remove the account: " + Redactor.Redact(ex.Message),
                 "Usage Widget", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
         }
+
+        // Best-effort secret cleanup. An orphaned encrypted blob is harmless (ids are GUIDs, never
+        // reused), so this never blocks the removal the user already confirmed.
+        try { _secrets!.Delete(row.Account.Id, row.Account.Source); }
+        catch (Exception ex) { Log("remove-secret", ex); }
     }
 
     /// <summary>Best-effort redacted log to %APPDATA%\UsageWidget\log.txt for post-hoc diagnosis.</summary>

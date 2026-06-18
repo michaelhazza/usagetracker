@@ -1,5 +1,6 @@
 using System.Windows;
 using UsageWidget.Core.Accounts;
+using UsageWidget.Core.Security;
 
 namespace UsageWidget.App.UI;
 
@@ -45,7 +46,7 @@ public partial class ManageAccountWindow : Window
         }
         catch (Exception ex)
         {
-            error = ex.Message;
+            error = Redactor.Redact(ex.Message);
         }
         SetBusy(false, null);
 
