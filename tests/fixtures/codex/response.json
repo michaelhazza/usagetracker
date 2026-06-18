@@ -1,11 +1,11 @@
 {
   "_comment": "REDACTED synthetic response. Reset values are durations (seconds) -> converted to absolute reset times at refresh.",
-  "rate_limits": {
-    "primary": {
+  "rate_limit": {
+    "primary_window": {
       "used_percent": 30,
       "reset_after_seconds": 3600
     },
-    "secondary": {
+    "secondary_window": {
       "used_percent": 65,
       "reset_after_seconds": 86400
     }
