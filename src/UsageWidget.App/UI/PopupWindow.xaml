@@ -3,12 +3,24 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="clr-namespace:UsageWidget.App.UI"
         Title="Usage Widget"
-        Width="360" SizeToContent="Height"
+        Width="360" MinWidth="280" MaxWidth="900" SizeToContent="Height"
         WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
         Background="Transparent" ShowInTaskbar="False" Topmost="True"
         Deactivated="OnDeactivated">
-    <Border Background="{StaticResource PanelBrush}" CornerRadius="10" Padding="12">
+    <Grid>
+    <Border Background="{StaticResource PanelBrush}" CornerRadius="10" Padding="12"
+            MouseLeftButtonDown="OnDragMove">
         <StackPanel>
+            <!-- Header: drag hint (whole panel is draggable) + a pin toggle (stay-on-top / no auto-hide). -->
+            <DockPanel Margin="0,0,0,6">
+                <ToggleButton x:Name="PinButton" DockPanel.Dock="Right" Click="OnTogglePin"
+                              Content="📌" FontSize="11" Padding="4,0" BorderThickness="0"
+                              Background="Transparent" Foreground="#999999" Cursor="Hand"
+                              ToolTip="Pin: keep on top and stop auto-hiding" />
+                <TextBlock Text="⠿  drag to move" Foreground="#666666" FontSize="10"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </DockPanel>
+
             <!-- Empty state (v3.1): no accounts => no polling, offer the next actions. -->
             <StackPanel x:Name="EmptyState"
                         Visibility="{Binding IsEmpty, Converter={x:Static ui:BoolToVisibility.Instance}}">
@@ -33,31 +45,66 @@
                                         <TextBlock Text="{Binding ServiceGlyph}" Foreground="White"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Border>
-                                    <TextBlock Text="{Binding Label}" Foreground="White" FontWeight="SemiBold" />
+                                    <!-- Row actions: Manage (rename / re-paste) · reorder · remove. -->
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                        <Button Content="✎" Click="OnManageClick" Width="22" Padding="0"
+                                                FontSize="11" Foreground="#BBBBBB" Background="Transparent"
+                                                BorderThickness="0" Cursor="Hand"
+                                                ToolTip="Manage (rename / re-paste token)" />
+                                        <Button Content="▲" Click="OnMoveUpClick" Width="20" Padding="0"
+                                                FontSize="9" Foreground="#BBBBBB" Background="Transparent"
+                                                BorderThickness="0" Cursor="Hand" ToolTip="Move up" />
+                                        <Button Content="▼" Click="OnMoveDownClick" Width="20" Padding="0"
+                                                FontSize="9" Foreground="#BBBBBB" Background="Transparent"
+                                                BorderThickness="0" Cursor="Hand" ToolTip="Move down" />
+                                        <Button Content="✕" Click="OnRemoveClick" Width="22" Padding="0"
+                                                FontSize="11" Foreground="#C77" Background="Transparent"
+                                                BorderThickness="0" Cursor="Hand" ToolTip="Remove account" />
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding Label}" Foreground="White" FontWeight="SemiBold"
+                                               VerticalAlignment="Center" />
                                 </DockPanel>
 
-                                <!-- Session bar -->
+                                <!-- Session bar: caption | bar (stretches with width) | fixed reset column -->
                                 <Grid Margin="0,6,0,0">
-                                    <ProgressBar Height="10" Minimum="0" Maximum="100"
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="46" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="104" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Session" Foreground="#999999"
+                                               FontSize="10" VerticalAlignment="Center" />
+                                    <ProgressBar Grid.Column="1" Height="10" Minimum="0" Maximum="100"
                                                  Value="{Binding SessionPct, Mode=OneWay}" />
-                                    <TextBlock Text="{Binding SessionCountdown}" Foreground="#DDDDDD"
-                                               FontSize="10" HorizontalAlignment="Right" />
+                                    <TextBlock Grid.Column="2" Text="{Binding SessionCountdown}" Foreground="#DDDDDD"
+                                               FontSize="10" Margin="6,0,0,0" VerticalAlignment="Center"
+                                               HorizontalAlignment="Right" TextAlignment="Right" />
                                 </Grid>
 
-                                <!-- Weekly bar -->
+                                <!-- Weekly bar: caption | bar (stretches with width) | fixed reset column -->
                                 <Grid Margin="0,4,0,0">
-                                    <ProgressBar Height="10" Minimum="0" Maximum="100"
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="46" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="104" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Weekly" Foreground="#999999"
+                                               FontSize="10" VerticalAlignment="Center" />
+                                    <ProgressBar Grid.Column="1" Height="10" Minimum="0" Maximum="100"
                                                  Value="{Binding WeeklyPct, Mode=OneWay}" />
-                                    <TextBlock Text="{Binding WeeklyCountdown}" Foreground="#DDDDDD"
-                                               FontSize="10" HorizontalAlignment="Right" />
+                                    <TextBlock Grid.Column="2" Text="{Binding WeeklyCountdown}" Foreground="#DDDDDD"
+                                               FontSize="10" Margin="6,0,0,0" VerticalAlignment="Center"
+                                               HorizontalAlignment="Right" TextAlignment="Right" />
                                 </Grid>
 
-                                <!-- Per-row state / re-paste prompt -->
+                                <!-- Per-row state: shown for loading AND every error kind (not just
+                                     Unauthorized), so a row is never a silent pair of empty bars. -->
                                 <DockPanel Margin="0,4,0,0"
-                                           Visibility="{Binding NeedsRepaste, Converter={x:Static ui:BoolToVisibility.Instance}}">
+                                           Visibility="{Binding ShowStatus, Converter={x:Static ui:BoolToVisibility.Instance}}">
                                     <Button Content="Re-paste token" DockPanel.Dock="Right" Padding="6,2"
+                                            Visibility="{Binding NeedsRepaste, Converter={x:Static ui:BoolToVisibility.Instance}}"
                                             Click="OnRepasteClick" />
-                                    <TextBlock Text="{Binding StateMessage}" Foreground="#E0A0A0"
+                                    <TextBlock Text="{Binding StatusText}" Foreground="#E0C28A"
                                                FontSize="10" VerticalAlignment="Center" TextWrapping="Wrap" />
                                 </DockPanel>
                             </StackPanel>
@@ -75,4 +122,18 @@
             </DockPanel>
         </StackPanel>
     </Border>
+
+        <!-- Right-edge grip: drag to make the widget wider/narrower (height stays content-driven). -->
+        <Thumb HorizontalAlignment="Right" VerticalAlignment="Stretch" Width="10" Cursor="SizeWE"
+               Margin="0,8,2,8" DragDelta="OnResizeWidth" DragCompleted="OnResizeCompleted">
+            <Thumb.Template>
+                <ControlTemplate TargetType="Thumb">
+                    <Border Background="Transparent">
+                        <Rectangle Width="2" Height="22" Fill="#4D4D4D" RadiusX="1" RadiusY="1"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                </ControlTemplate>
+            </Thumb.Template>
+        </Thumb>
+    </Grid>
 </Window>

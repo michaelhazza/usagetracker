@@ -7,10 +7,10 @@ namespace UsageWidget.Core.Polling;
 public sealed class PollingSettings
 {
     /// <summary>Default per-account cadence. Requests are staggered, not fired simultaneously.</summary>
-    public TimeSpan DefaultCadence { get; set; } = TimeSpan.FromMinutes(3);
+    public TimeSpan DefaultCadence { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>Slower cadence when the session is locked or the user is idle.</summary>
-    public TimeSpan IdleCadence { get; set; } = TimeSpan.FromMinutes(15);
+    public TimeSpan IdleCadence { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary>Idle threshold after which <see cref="IdleCadence"/> applies.</summary>
     public TimeSpan IdleAfter { get; set; } = TimeSpan.FromMinutes(15);

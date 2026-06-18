@@ -15,14 +15,17 @@ public abstract class ObservableObject : INotifyPropertyChanged
     {
         if (EqualityComparer<T>.Default.Equals(field, value)) return;
         field = value;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        Raise(name);
     }
+
+    protected void Raise(string? name) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
 /// <summary>One popup row per account: label, icon, two bars, countdowns, and per-row state.</summary>
 public sealed class AccountRowViewModel : ObservableObject
 {
-    private string _label = "";
+    private string _label;
     private double? _sessionPct;
     private double? _weeklyPct;
     private string _sessionCountdown = "";
@@ -30,7 +33,11 @@ public sealed class AccountRowViewModel : ObservableObject
     private RowState _state = RowState.Loading;
     private string _stateMessage = "";
 
-    public AccountRowViewModel(Account account) => Account = account;
+    public AccountRowViewModel(Account account)
+    {
+        Account = account;
+        _label = account.DisplayLabel(null); // show the nickname immediately, before the first fetch
+    }
 
     public Account Account { get; }
     public string ServiceGlyph => Account.Source.ToString().StartsWith("Codex") ? "X" : "C";
@@ -40,10 +47,56 @@ public sealed class AccountRowViewModel : ObservableObject
     public double? WeeklyPct { get => _weeklyPct; set => Set(ref _weeklyPct, value); }
     public string SessionCountdown { get => _sessionCountdown; set => Set(ref _sessionCountdown, value); }
     public string WeeklyCountdown { get => _weeklyCountdown; set => Set(ref _weeklyCountdown, value); }
-    public RowState State { get => _state; set => Set(ref _state, value); }
-    public string StateMessage { get => _stateMessage; set => Set(ref _stateMessage, value); }
+
+    public RowState State
+    {
+        get => _state;
+        set
+        {
+            if (_state == value) return;
+            _state = value;
+            Raise(nameof(State));
+            Raise(nameof(NeedsRepaste));
+            Raise(nameof(ShowStatus));
+            Raise(nameof(StatusText));
+        }
+    }
+
+    public string StateMessage
+    {
+        get => _stateMessage;
+        set
+        {
+            if (_stateMessage == value) return;
+            _stateMessage = value;
+            Raise(nameof(StateMessage));
+            Raise(nameof(StatusText));
+        }
+    }
 
     public bool NeedsRepaste => State == RowState.Unauthorized;
+
+    /// <summary>Show a status line for anything that isn't a clean success (loading or any error).</summary>
+    public bool ShowStatus => State != RowState.Ok;
+
+    /// <summary>
+    /// Human-readable status for the row. Previously only Unauthorized rows said anything; every other
+    /// non-OK state rendered as two blank bars with no explanation ("can't see what's going on").
+    /// </summary>
+    public string StatusText => State switch
+    {
+        RowState.Ok => "",
+        RowState.Loading => "Checking your usage…",
+        RowState.Unauthorized => Fallback("Session expired — click Re-paste token."),
+        RowState.Challenge => Fallback("Blocked by a security check (Cloudflare). Re-paste a fresh request."),
+        RowState.RateLimited => Fallback("Rate limited — will retry automatically."),
+        RowState.Stale => Fallback("Couldn't reach the server — will retry."),
+        RowState.ConfigProblem => Fallback("Endpoint not set up — open Advanced."),
+        _ => _stateMessage,
+    };
+
+    private string Fallback(string defaultText) =>
+        string.IsNullOrWhiteSpace(_stateMessage) ? defaultText : _stateMessage;
 
     /// <summary>Apply a refresh result. Countdowns are rendered in local time (contract #6).</summary>
     public void Apply(UsageResult result, DateTimeOffset nowLocal)
@@ -73,7 +126,9 @@ public sealed class AccountRowViewModel : ObservableObject
     }
 
     private static string Countdown(DateTimeOffset? resetAt, DateTimeOffset nowLocal) =>
-        resetAt is null ? "" : TimeMath.FormatCountdown(resetAt.Value.ToLocalTime(), nowLocal);
+        // Claude returns resets_at:null for a window that hasn't been used yet (e.g. a fresh 5h
+        // session at 0%). Show "Not started" rather than leaving the slot blank.
+        resetAt is null ? "Not started" : TimeMath.FormatResetLabel(resetAt.Value, nowLocal);
 }
 
 public enum RowState { Loading, Ok, Stale, RateLimited, Unauthorized, Challenge, ConfigProblem }
@@ -96,5 +151,21 @@ public sealed class MainViewModel : ObservableObject
         }
 
         IsEmpty = Rows.Count == 0;
+    }
+
+    /// <summary>
+    /// Move a row up (delta -1) or down (delta +1), preserving each row's live state (we reorder the
+    /// existing items rather than rebuilding). Reassigns Account.Order so the new order persists.
+    /// Returns true if anything moved.
+    /// </summary>
+    public bool Move(AccountRowViewModel row, int delta)
+    {
+        var from = Rows.IndexOf(row);
+        var to = from + delta;
+        if (from < 0 || to < 0 || to >= Rows.Count) return false;
+
+        Rows.Move(from, to);
+        for (var i = 0; i < Rows.Count; i++) Rows[i].Account.Order = i;
+        return true;
     }
 }

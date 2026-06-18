@@ -44,6 +44,20 @@ public static class TimeMath
         => now.ToUniversalTime().AddSeconds(seconds);
 
     /// <summary>
+    /// Render a reset label for the widget: "Resets in 38 min" / "Resets in 4h 32m" for anything in
+    /// the next day, or an absolute "Resets Tue 3:00 PM" (local time) further out. Offset-aware:
+    /// pass the UTC reset and the current local time.
+    /// </summary>
+    public static string FormatResetLabel(DateTimeOffset resetAt, DateTimeOffset now)
+    {
+        var remaining = resetAt - now;
+        if (remaining <= TimeSpan.Zero) return "Resetting now";
+        if (remaining.TotalHours < 1) return $"Resets in {Math.Max(1, (int)remaining.TotalMinutes)} min";
+        if (remaining.TotalHours < 24) return $"Resets in {(int)remaining.TotalHours}h {remaining.Minutes:00}m";
+        return $"Resets {resetAt.ToLocalTime():ddd h:mm tt}";
+    }
+
+    /// <summary>
     /// Render a human countdown ("4h 32m", "12m 03s", "now"). Caller passes local-time values per
     /// contract #6; the math is offset-agnostic.
     /// </summary>

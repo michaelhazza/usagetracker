@@ -68,7 +68,13 @@ public sealed class AccountRefresher
         var result = await adapter.FetchAsync(account, template, secret, _sender, now, ct).ConfigureAwait(false);
 
         if (result.IsSuccess) backoff.OnSuccess();
-        else if (result.ErrorKind == RefreshErrorKind.RateLimited) backoff.OnRateLimited(now);
+        // Back off on a 429 AND on a Cloudflare/anti-automation challenge: hammering a challenged
+        // endpoint at the 60s cadence only escalates the block. Transient Stale/timeout is left to
+        // retry next cycle so a brief network blip doesn't make the widget look dead.
+        else if (result.ErrorKind is RefreshErrorKind.RateLimited or RefreshErrorKind.Challenge)
+        {
+            backoff.OnRateLimited(now);
+        }
 
         return result;
     }

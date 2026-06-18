@@ -22,6 +22,12 @@ public sealed class AdapterConfig
 
     public PollingSettings Polling { get; set; } = new();
 
+    /// <summary>Last on-screen position of the popup widget, so it reopens where the user left it.</summary>
+    public WindowBounds? Window { get; set; }
+
+    /// <summary>When true, the widget stays on top and does not auto-hide on focus loss (pinned).</summary>
+    public bool Pinned { get; set; }
+
     public RequestTemplate? TemplateFor(AccountSource source) =>
         TemplatesBySource.TryGetValue(source.ToString(), out var t) ? t : null;
 }

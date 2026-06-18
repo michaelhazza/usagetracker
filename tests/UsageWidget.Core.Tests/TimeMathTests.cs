@@ -47,6 +47,57 @@ public class TimeMathTests
     }
 
     [Fact]
+    public void Reset_label_shows_minutes_within_the_hour()
+    {
+        var now = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        Assert.Equal("Resets in 38 min", TimeMath.FormatResetLabel(now.AddMinutes(38), now));
+    }
+
+    [Fact]
+    public void Reset_label_shows_hours_and_minutes_within_a_day()
+    {
+        var now = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        Assert.Equal("Resets in 4h 32m", TimeMath.FormatResetLabel(now.AddHours(4).AddMinutes(32), now));
+    }
+
+    [Fact]
+    public void Reset_label_clamps_sub_minute_to_one_minute()
+    {
+        var now = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        Assert.Equal("Resets in 1 min", TimeMath.FormatResetLabel(now.AddSeconds(20), now));
+    }
+
+    [Fact]
+    public void Reset_label_shows_resetting_now_when_already_expired()
+    {
+        var now = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        Assert.Equal("Resetting now", TimeMath.FormatResetLabel(now.AddMinutes(-5), now));
+    }
+
+    [Fact]
+    public void Reset_label_remaining_is_offset_aware()
+    {
+        // now is 10:00 at +05:00 (= 05:00 UTC); reset is 05:30 UTC => 30 minutes out regardless of
+        // the differing offsets. Locks the offset-aware subtraction (the absolute render is machine-
+        // local-tz dependent, so only the relative form is asserted cross-machine).
+        var now = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.FromHours(5));
+        var resetUtc = new DateTimeOffset(2026, 1, 1, 5, 30, 0, TimeSpan.Zero);
+        Assert.Equal("Resets in 30 min", TimeMath.FormatResetLabel(resetUtc, now));
+    }
+
+    [Fact]
+    public void Reset_label_uses_absolute_form_beyond_a_day()
+    {
+        var now = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var label = TimeMath.FormatResetLabel(now.AddDays(3), now);
+
+        // Absolute weekday/time form (e.g. "Resets Sat 12:00 AM"), tz-dependent on render so we only
+        // assert it's the absolute branch, not a relative "Resets in …" countdown.
+        Assert.StartsWith("Resets ", label);
+        Assert.DoesNotContain("in", label);
+    }
+
+    [Fact]
     public void Elapsed_fraction_uses_period_start_derived_from_reset()
     {
         var now = new DateTimeOffset(2026, 6, 17, 12, 0, 0, TimeSpan.Zero);
