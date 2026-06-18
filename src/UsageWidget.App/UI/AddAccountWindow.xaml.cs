@@ -46,7 +46,7 @@ public partial class AddAccountWindow : Window
             "1. Open this account in your browser → chatgpt.com/codex and sign in.\n" +
             "2. Press F12 → click the Network tab → tick 'Fetch/XHR'.\n" +
             "3. Reload the page so Codex loads your usage limits.\n" +
-            "4. Right-click the request named 'usage' → Copy → Copy as cURL.\n" +
+            "4. Right-click the 'usage' request (path /backend-api/wham/usage) → Copy → Copy as cURL.\n" +
             "5. Paste it in the box below and click Save. That's it.",
         _ =>
             "1. Open this account in your browser → claude.ai → Settings → Usage.\n" +

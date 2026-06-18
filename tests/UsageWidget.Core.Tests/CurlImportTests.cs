@@ -114,6 +114,60 @@ public class CurlImportTests
         Assert.Throws<FormatException>(() => CurlAccountImport.Build(curl, AccountSource.ClaudeWebToken));
     }
 
+    // A realistic "Copy as cURL" for the Codex usage request: Bearer auth, no cookie (token placeholder).
+    private const string CodexCurl =
+        "curl 'https://chatgpt.com/backend-api/wham/usage' \\\n" +
+        "  -H 'accept: */*' \\\n" +
+        "  -H 'authorization: Bearer EXAMPLETOKEN123' \\\n" +
+        "  --compressed";
+
+    [Fact]
+    public void Import_bakes_codex_rate_limit_mappings()
+    {
+        var imported = CurlAccountImport.Build(CodexCurl, AccountSource.CodexPastedToken);
+
+        Assert.Equal("$.rate_limit.primary_window.used_percent", imported.Template.Mappings.SessionPct);
+        Assert.Equal("$.rate_limit.primary_window.reset_after_seconds", imported.Template.Mappings.SessionReset);
+        Assert.Equal(ResetKind.DurationSeconds, imported.Template.Mappings.SessionResetKind);
+        Assert.Equal("$.rate_limit.secondary_window.used_percent", imported.Template.Mappings.WeeklyPct);
+        Assert.Equal("$.rate_limit.secondary_window.reset_after_seconds", imported.Template.Mappings.WeeklyReset);
+        Assert.Equal(ResetKind.DurationSeconds, imported.Template.Mappings.WeeklyResetKind);
+
+        // Bearer token is the stored secret; the header is replaced with the placeholder.
+        Assert.Contains("EXAMPLETOKEN123", imported.Secret);
+        Assert.Equal(RequestTemplate.TokenPlaceholder, imported.Template.Headers["authorization"]);
+        Assert.DoesNotContain("EXAMPLETOKEN123", string.Join("|", imported.Template.Headers.Values));
+    }
+
+    [Fact]
+    public async Task End_to_end_imported_codex_template_parses_the_real_usage_response()
+    {
+        // Trimmed copy of an actual backend-api/wham/usage response (numbers only — no secrets).
+        const string realResponse = """
+        {
+          "rate_limit": {
+            "primary_window": { "used_percent": 43, "reset_after_seconds": 7592 },
+            "secondary_window": { "used_percent": 18, "reset_after_seconds": 576386 }
+          }
+        }
+        """;
+
+        var imported = CurlAccountImport.Build(CodexCurl, AccountSource.CodexPastedToken);
+        var account = new Account { Source = AccountSource.CodexPastedToken, Nickname = "Codex", Template = imported.Template };
+        var adapter = new TemplateAdapter(AccountSource.CodexPastedToken, new MappingEngine());
+        var sender = new FakeSender(FakeSender.Json(realResponse));
+        var now = new DateTimeOffset(2026, 6, 18, 1, 0, 0, TimeSpan.Zero);
+
+        var result = await adapter.FetchAsync(account, imported.Template, imported.Secret, sender, now, default);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(43, result.Session!.Pct);
+        Assert.Equal(18, result.Weekly!.Pct);
+        Assert.Equal(now.AddSeconds(7592), result.Session.ResetAt);
+        Assert.Equal(now.AddSeconds(576386), result.Weekly.ResetAt);
+        Assert.Equal("Bearer EXAMPLETOKEN123", sender.LastHeaders!["authorization"]);
+    }
+
     [Fact]
     public async Task End_to_end_imported_template_parses_the_real_claude_response()
     {

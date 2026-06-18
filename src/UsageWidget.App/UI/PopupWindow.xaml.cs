@@ -150,6 +150,18 @@ public partial class PopupWindow : Window
 
     private void OnRefreshClick(object sender, RoutedEventArgs e) => RefreshRequested?.Invoke();
 
+    /// <summary>
+    /// Disable the header refresh button while a forced refresh is in flight. Forced refresh
+    /// intentionally bypasses backoff, so without this an impatient click-storm could stack
+    /// concurrent requests at a challenged/rate-limited endpoint — the disable bounds it to one
+    /// in-flight call at a time.
+    /// </summary>
+    public void SetRefreshing(bool refreshing)
+    {
+        RefreshButton.IsEnabled = !refreshing;
+        RefreshButton.Opacity = refreshing ? 0.4 : 1.0;
+    }
+
     private void OnTogglePin(object sender, RoutedEventArgs e)
     {
         _pinned = !_pinned;
