@@ -25,6 +25,13 @@ public sealed class Account
     /// </summary>
     public string? AuthJsonPath { get; set; }
 
+    /// <summary>
+    /// Per-account request template. Set when the account is imported from a captured cURL (each
+    /// Claude account has its own usage URL/org), and used in preference to the shared per-source
+    /// template. Null falls back to the shared template for the source.
+    /// </summary>
+    public Templating.RequestTemplate? Template { get; set; }
+
     public string DisplayLabel(string? resolvedIdentity) =>
         resolvedIdentity ?? Nickname ?? $"{Source} {Id[..Math.Min(6, Id.Length)]}";
 }
