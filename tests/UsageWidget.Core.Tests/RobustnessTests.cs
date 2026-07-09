@@ -706,6 +706,63 @@ public class EdgeBlockClassificationTests
     }
 }
 
+public class MigratingSecretStoreTests
+{
+    private sealed class ThrowingStore : ISecretStore
+    {
+        public string KeyFor(string accountId, AccountSource source) => SecretKey.For(accountId, source);
+        public void Set(string accountId, AccountSource source, string secret) => throw new InvalidOperationException();
+        public string? Get(string accountId, AccountSource source) => throw new InvalidOperationException();
+        public bool Delete(string accountId, AccountSource source) => throw new InvalidOperationException();
+    }
+
+    [Fact]
+    public void Legacy_secret_is_found_and_migrated_forward()
+    {
+        var primary = new InMemorySecretStore();
+        var legacy = new InMemorySecretStore();
+        legacy.Set("id1", AccountSource.ClaudeWebToken, "old-secret");
+
+        var store = new MigratingSecretStore(primary, legacy);
+
+        Assert.Equal("old-secret", store.Get("id1", AccountSource.ClaudeWebToken));
+        // Migrated: the next read no longer depends on the legacy store existing.
+        Assert.Equal("old-secret", primary.Get("id1", AccountSource.ClaudeWebToken));
+    }
+
+    [Fact]
+    public void Primary_secret_wins_over_legacy()
+    {
+        var primary = new InMemorySecretStore();
+        var legacy = new InMemorySecretStore();
+        primary.Set("id1", AccountSource.ClaudeWebToken, "new");
+        legacy.Set("id1", AccountSource.ClaudeWebToken, "old");
+
+        Assert.Equal("new", new MigratingSecretStore(primary, legacy).Get("id1", AccountSource.ClaudeWebToken));
+    }
+
+    [Fact]
+    public void Broken_legacy_store_reads_as_a_miss_not_a_crash()
+    {
+        var store = new MigratingSecretStore(new InMemorySecretStore(), new ThrowingStore());
+        Assert.Null(store.Get("id1", AccountSource.ClaudeWebToken));
+    }
+
+    [Fact]
+    public void Delete_wipes_both_stores()
+    {
+        var primary = new InMemorySecretStore();
+        var legacy = new InMemorySecretStore();
+        primary.Set("id1", AccountSource.ClaudeWebToken, "new");
+        legacy.Set("id1", AccountSource.ClaudeWebToken, "old");
+
+        Assert.True(new MigratingSecretStore(primary, legacy).Delete("id1", AccountSource.ClaudeWebToken));
+
+        Assert.Null(primary.Get("id1", AccountSource.ClaudeWebToken));
+        Assert.Null(legacy.Get("id1", AccountSource.ClaudeWebToken));
+    }
+}
+
 public class FormatAgeTests
 {
     private static readonly DateTimeOffset Now = new(2026, 6, 17, 12, 0, 0, TimeSpan.Zero);

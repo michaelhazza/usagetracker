@@ -82,7 +82,9 @@ public partial class App : Application
         _config = LoadOrSeedConfig();
 
         // DPAPI-encrypted file store: handles large session cookies that exceed Credential Manager.
-        _secrets = new DpapiSecretStore();
+        // Wrapped so secrets stored by older builds in Credential Manager still resolve (and are
+        // migrated forward) instead of every pre-existing account demanding a re-paste.
+        _secrets = new MigratingSecretStore(new DpapiSecretStore(), new WindowsCredentialManagerStore());
         _sender = new HttpClientSender();
 
         // One quick in-cycle retry for transient faults (timeouts, DNS blips, 5xx) so a single
