@@ -31,35 +31,35 @@ public static class CurlAccountImport
             throw new FormatException("The cURL didn't contain a valid web address.");
         }
 
-        // Find the credential header to store as the secret (cookie preferred for claude.ai).
-        var secretHeader = parsed.Headers.Keys
-            .FirstOrDefault(k => SecretHeaders.Contains(k, StringComparer.OrdinalIgnoreCase));
-        if (secretHeader is null)
+        // Collect EVERY credential header, in the stable cookie-first priority of SecretHeaders.
+        // Captures routinely carry both a Cookie and an Authorization header, and the replay can
+        // need both (e.g. Codex behind Cloudflare: bearer for the API, cookies for the edge) —
+        // silently dropping one produced accounts that authenticated on day one and died later.
+        var credentials = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in SecretHeaders)
+        {
+            if (parsed.Headers.TryGetValue(name, out var value)) credentials[name] = value;
+        }
+
+        if (credentials.Count == 0)
         {
             throw new FormatException(
                 "Couldn't find your login in the cURL (no cookie or authorization header). " +
                 "Re-copy the request that shows your usage numbers.");
         }
 
-        var secret = parsed.Headers[secretHeader];
+        var secret = credentials.Count == 1
+            ? credentials.Values.Single()
+            : MultiSecret.Serialize(credentials);
 
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, value) in parsed.Headers)
         {
             if (StripHeaders.Contains(name) || name.StartsWith(':')) continue; // pseudo/problem headers
 
-            if (name.Equals(secretHeader, StringComparison.OrdinalIgnoreCase))
-            {
-                headers[name] = RequestTemplate.TokenPlaceholder; // secret injected at send time
-            }
-            else if (SecretHeaders.Contains(name, StringComparer.OrdinalIgnoreCase))
-            {
-                continue; // a second credential header — never persist it in plaintext
-            }
-            else
-            {
-                headers[name] = value;
-            }
+            headers[name] = credentials.ContainsKey(name)
+                ? RequestTemplate.TokenPlaceholder // secret injected at send time (contract #3)
+                : value;
         }
 
         var template = new RequestTemplate
@@ -78,7 +78,10 @@ public static class CurlAccountImport
 
     /// <summary>
     /// Pre-baked field locations so the user never sees a JSONPath box. Claude's usage endpoint
-    /// returns five_hour / seven_day objects (verified against a live response).
+    /// returns five_hour / seven_day objects; Codex returns rate_limits.primary/secondary with
+    /// duration-based resets (both verified against captured responses — see tests/fixtures).
+    /// An imported account must never ship an EMPTY mapping: its per-account template shadows the
+    /// shared one, which would leave the row a permanent "config problem".
     /// </summary>
     private static MappingConfig MappingsFor(AccountSource source) => source switch
     {
@@ -90,6 +93,15 @@ public static class CurlAccountImport
             WeeklyPct = "$.seven_day.utilization",
             WeeklyReset = "$.seven_day.resets_at",
             WeeklyResetKind = ResetKind.Timestamp,
+        },
+        AccountSource.CodexPastedToken or AccountSource.CodexAuthJson => new MappingConfig
+        {
+            SessionPct = "$.rate_limits.primary.used_percent",
+            SessionReset = "$.rate_limits.primary.reset_after_seconds",
+            SessionResetKind = ResetKind.DurationSeconds,
+            WeeklyPct = "$.rate_limits.secondary.used_percent",
+            WeeklyReset = "$.rate_limits.secondary.reset_after_seconds",
+            WeeklyResetKind = ResetKind.DurationSeconds,
         },
         _ => new MappingConfig(),
     };

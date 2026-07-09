@@ -38,7 +38,19 @@ public sealed class ConfigStore
         }
 
         var raw = File.ReadAllText(_path);
-        var root = JObject.Parse(raw);
+        JObject root;
+        try
+        {
+            root = JObject.Parse(raw);
+        }
+        catch (JsonException)
+        {
+            // A torn/corrupt file (interrupted write, disk hiccup) must not brick startup forever.
+            // Preserve the evidence and start from defaults — secrets live elsewhere and survive.
+            File.Copy(_path, _path + ".corrupt.bak", overwrite: true);
+            return new AdapterConfig();
+        }
+
         var version = ConfigMigrator.ReadVersion(root);
 
         if (version < AdapterConfig.CurrentSchemaVersion)
@@ -48,7 +60,7 @@ public sealed class ConfigStore
             File.WriteAllText(backupPath, raw);
 
             root = ConfigMigrator.Migrate(root);
-            File.WriteAllText(_path, root.ToString(Formatting.Indented));
+            WriteAtomically(root.ToString(Formatting.Indented));
         }
 
         return root.ToObject<AdapterConfig>(JsonSerializer.Create(SerializerSettings))
@@ -61,7 +73,17 @@ public sealed class ConfigStore
         var dir = Path.GetDirectoryName(_path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-        var json = JsonConvert.SerializeObject(config, SerializerSettings);
-        File.WriteAllText(_path, json);
+        WriteAtomically(JsonConvert.SerializeObject(config, SerializerSettings));
+    }
+
+    /// <summary>
+    /// Write-to-temp-then-rename so a crash or power loss mid-save can never leave a half-written
+    /// config (the accounts list lives here — losing it looks like every account vanished).
+    /// </summary>
+    private void WriteAtomically(string json)
+    {
+        var tmp = _path + ".tmp";
+        File.WriteAllText(tmp, json);
+        File.Move(tmp, _path, overwrite: true);
     }
 }

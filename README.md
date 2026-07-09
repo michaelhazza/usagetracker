@@ -14,7 +14,7 @@ is gated on captured request fixtures — see [Status](#status).
 
 | Track | What | State |
 |-------|------|-------|
-| **A — framework** | adapters, template/mapping engine, redaction, allowlist, config + migration, polling/isolation, secret store, tray/popup shell | ✅ built, **80 offline tests passing** |
+| **A — framework** | adapters, template/mapping engine, redaction, allowlist, config + migration, polling/isolation, secret store, tray/popup shell | ✅ built, **151 offline tests passing** |
 | **B — live path** | real Claude/Codex endpoint replay | ⛔ gated on a captured request fixture (§0) |
 
 The Claude and Codex usage endpoints are undocumented, so their request templates ship as
@@ -103,7 +103,36 @@ These are the non-negotiable contracts from the brief, each backed by tests:
 - **Error taxonomy** Unauthorized / RateLimited / NetworkTimeout / Challenge / ParseFailed
   (`Model/RefreshErrorKind.cs`, `Net/ResponseClassifier.cs`), with Cloudflare interstitials detected
   as `Challenge`, not `ParseFailed` (`Security/ChallengeDetector.cs`).
-- **Config schema versioning + backup** (`Config/ConfigStore.cs`, `Config/ConfigMigrator.cs`).
+- **Config schema versioning + backup** (`Config/ConfigStore.cs`, `Config/ConfigMigrator.cs`),
+  with atomic writes and corrupt-file recovery.
+
+### Connection robustness
+
+The transport and polling layers are hardened for a long-running, multi-account tray app:
+
+- **Cookies replay verbatim** — the HTTP handler's cookie container is disabled, so one account's
+  `Set-Cookie` (Cloudflare rotates edge cookies constantly) can never overwrite or cross-contaminate
+  another account's pasted session cookie (`Net/HttpClientSender.cs`).
+- **Transport headers stripped at send time** — a captured `Accept-Encoding: … zstd` would make the
+  server reply with compression .NET can't decode; `Host`/`Content-Length`/`Connection` and friends
+  are derived from the actual request instead of replayed.
+- **Transient retry with jitter** — one quick in-cycle retry for timeouts, DNS/connect faults and
+  408/5xx (never for 429 or challenges) (`Net/RetryingHttpSender.cs`).
+- **Staggered polling** — accounts refresh a few seconds apart, never as one burst, at a 3-minute
+  default cadence (§11); cycles are serialized so a manual refresh can't double-fetch
+  (`Polling/RefreshCoordinator.cs`, `Polling/PollingLoop.cs`).
+- **Backoff that names its cause** — 429 and challenge backoffs keep reporting "rate limited" vs
+  "security check" with a retry ETA, and a re-pasted login clears the backoff immediately
+  (`Polling/BackoffPolicy.cs`, `Polling/AccountRefresher.cs`).
+- **Proxy-aware** — authenticated system proxies get the signed-in user's credentials; HTTP 407 is
+  reported as a proxy problem, not a token problem; the client is rotated periodically so proxy/VPN
+  changes are picked up without a restart.
+- **Multi-credential captures** — a request that carries both a `Cookie` and an `Authorization`
+  header keeps BOTH (stored as one encrypted envelope, each injected into its own header)
+  (`Templating/TemplateEngine.cs`, `Import/CurlAccountImport.cs`).
+- **Honest failure states** — the UI keeps the last good numbers through transient failures and
+  shows how old they are once stale (2× cadence); an HTML login page classifies as "session
+  expired", a marker-less edge block as a challenge, never as a "config problem".
 
 ---
 

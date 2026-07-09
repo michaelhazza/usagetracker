@@ -5,10 +5,12 @@ using UsageWidget.App.Services;
 using UsageWidget.App.Tray;
 using UsageWidget.App.UI;
 using UsageWidget.Core.Accounts;
+using UsageWidget.Core.Adapters;
 using UsageWidget.Core.Config;
 using UsageWidget.Core.Import;
 using UsageWidget.Core.Model;
 using UsageWidget.Core.Net;
+using UsageWidget.Core.Polling;
 using UsageWidget.Core.Secrets;
 using UsageWidget.Core.Security;
 
@@ -26,6 +28,7 @@ public partial class App : Application
     private SingleInstance? _single;
     private TrayService? _tray;
     private PollingLoop? _loop;
+    private AccountRefresher? _refresher;
     private HttpClientSender? _sender;
     private PopupWindow? _popup;
     private MainViewModel? _vm;
@@ -58,13 +61,35 @@ public partial class App : Application
             args.Handled = true;
         };
 
+        try
+        {
+            InitializeServices(e);
+        }
+        catch (Exception ex)
+        {
+            // A startup failure (e.g. corrupt config) must not leave a headless zombie process
+            // with no tray icon and no window — tell the user and exit cleanly.
+            Log("startup", ex);
+            MessageBox.Show(
+                "Usage Widget couldn't start: " + Redactor.Redact(ex.Message),
+                "Usage Widget", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown();
+        }
+    }
+
+    private void InitializeServices(StartupEventArgs e)
+    {
         _config = LoadOrSeedConfig();
 
         // DPAPI-encrypted file store: handles large session cookies that exceed Credential Manager.
         _secrets = new DpapiSecretStore();
         _sender = new HttpClientSender();
+
+        // One quick in-cycle retry for transient faults (timeouts, DNS blips, 5xx) so a single
+        // dropped packet doesn't mark an account failed until the next cadence tick.
+        var sender = new RetryingHttpSender(_sender, _config.Polling.TransientRetryAttempts);
         var factory = new AdapterFactory(_config.Polling);
-        var refresher = new AccountRefresher(factory, _secrets, _sender);
+        _refresher = new AccountRefresher(factory, _secrets, sender);
 
         _vm = new MainViewModel();
         _vm.Sync(_config.Accounts);
@@ -89,7 +114,9 @@ public partial class App : Application
         _tray.OnQuit += Shutdown;
         _tray.SetSeverity(null, null);
 
-        _loop = new PollingLoop(refresher, () => _config);
+        IdleDetector.Initialize();
+        _loop = new PollingLoop(_refresher, () => _config);
+        _loop.IsIdle = () => IdleDetector.IsIdleOrLocked(_config.Polling.IdleAfter);
         _loop.OnResults += ApplyResults;
         _loop.Start();
 
@@ -116,12 +143,22 @@ public partial class App : Application
             var nowLocal = DateTimeOffset.Now;
             foreach (var row in _vm!.Rows)
             {
-                if (results.TryGetValue(row.Account.Id, out var r)) row.Apply(r, nowLocal);
+                if (results.TryGetValue(row.Account.Id, out var r))
+                {
+                    row.Apply(r, nowLocal, _config.Polling.StaleAfter);
+                }
             }
 
-            _tray!.SetSeverity(
-                TrayStatus.WorstSessionPct(results.Values),
-                TrayStatus.OverallSeverity(results.Values));
+            // Drive the tray from the rows' retained last-good data, not this cycle's raw results:
+            // one all-failed cycle must not blank the icon while the rows still show usage.
+            double? worstPct = null;
+            foreach (var row in _vm.Rows)
+            {
+                if (row.SessionPct is { } pct && (worstPct is null || pct > worstPct)) worstPct = pct;
+            }
+
+            UsageSeverity? severity = worstPct is { } worst ? TrayStatus.SeverityFor(worst) : null;
+            _tray!.SetSeverity(worstPct, severity);
         });
     }
 
@@ -260,6 +297,10 @@ public partial class App : Application
 
         UpdateRowLabel(account);
 
+        // A re-pasted login means the user just fixed the account — clear any backoff so the
+        // next refresh proves it immediately instead of waiting out a stale penalty window.
+        if (newSecret is not null) _refresher!.ResetBackoff(account.Id);
+
         try { await _loop!.RefreshNowAsync(); }
         catch (Exception ex) { Log("manage-refresh", ex); }
 
@@ -295,6 +336,9 @@ public partial class App : Application
         // reused), so this never blocks the removal the user already confirmed.
         try { _secrets!.Delete(row.Account.Id, row.Account.Source); }
         catch (Exception ex) { Log("remove-secret", ex); }
+
+        // Refresh so the tray severity reflects the remaining accounts right away.
+        FireAndLogRefresh("remove-refresh");
     }
 
     private void UpdateRowLabel(Account account)
@@ -326,10 +370,38 @@ public partial class App : Application
 
     private void OnRepasteRequested(AccountRowViewModel row)
     {
-        var newToken = TokenPromptWindow.Prompt(row.Label);
-        if (string.IsNullOrEmpty(newToken)) return;
+        var pasted = TokenPromptWindow.Prompt(row.Label);
+        if (string.IsNullOrWhiteSpace(pasted)) return;
 
-        _secrets!.Set(row.Account.Id, row.Account.Source, newToken);
+        try
+        {
+            if (pasted.TrimStart().StartsWith("curl", StringComparison.OrdinalIgnoreCase))
+            {
+                // A full "Copy as cURL" refreshes the captured template AND the secret — the
+                // reliable recovery when edge cookies rotated or the endpoint moved. Pasting a
+                // bare token into an account whose template replays a whole Cookie header would
+                // silently break it.
+                var imported = CurlAccountImport.Build(pasted, row.Account.Source);
+                row.Account.Template = imported.Template;
+                _configStore.Save(_config);
+                _secrets!.Set(row.Account.Id, row.Account.Source, imported.Secret);
+            }
+            else
+            {
+                _secrets!.Set(row.Account.Id, row.Account.Source, pasted);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log("repaste", ex);
+            MessageBox.Show(
+                "Couldn't save the new login: " + Redactor.Redact(ex.Message),
+                "Usage Widget", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // The user just fixed the account — an old backoff window must not delay the proof.
+        _refresher!.ResetBackoff(row.Account.Id);
         FireAndLogRefresh("repaste-refresh");
     }
 

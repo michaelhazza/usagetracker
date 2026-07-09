@@ -1,9 +1,8 @@
 using UsageWidget.Core.Accounts;
-using UsageWidget.Core.Adapters;
 using UsageWidget.Core.Polling;
 using UsageWidget.Core.Templating;
 
-namespace UsageWidget.App.Services;
+namespace UsageWidget.Core.Adapters;
 
 /// <summary>
 /// Builds the right adapter per source type. Today every replay-based source uses the generic

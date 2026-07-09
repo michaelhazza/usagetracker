@@ -32,7 +32,13 @@ public sealed class DpapiSecretStore : ISecretStore
     {
         var plain = Encoding.UTF8.GetBytes(secret);
         var encrypted = ProtectedData.Protect(plain, optionalEntropy: null, DataProtectionScope.CurrentUser);
-        File.WriteAllBytes(PathFor(accountId, source), encrypted);
+
+        // Write-to-temp-then-rename: a crash mid-write must never leave a truncated blob that
+        // reads back as "corrupt" and silently costs the user a working login.
+        var path = PathFor(accountId, source);
+        var tmp = path + ".tmp";
+        File.WriteAllBytes(tmp, encrypted);
+        File.Move(tmp, path, overwrite: true);
     }
 
     public string? Get(string accountId, AccountSource source)
@@ -40,15 +46,19 @@ public sealed class DpapiSecretStore : ISecretStore
         var path = PathFor(accountId, source);
         if (!File.Exists(path)) return null;
 
+        // Only "this blob is genuinely undecryptable" may report as no-secret (the remedy IS a
+        // re-paste). Transient I/O failures (file momentarily locked by AV/backup, disk hiccup)
+        // must propagate — swallowing them showed a spurious "re-paste token" prompt for an
+        // account whose stored login was perfectly fine.
         try
         {
             var encrypted = File.ReadAllBytes(path);
             var plain = ProtectedData.Unprotect(encrypted, optionalEntropy: null, DataProtectionScope.CurrentUser);
             return Encoding.UTF8.GetString(plain);
         }
-        catch
+        catch (CryptographicException)
         {
-            return null; // corrupted or not decryptable by this user
+            return null; // corrupted or encrypted by a different Windows user
         }
     }
 
