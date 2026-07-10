@@ -124,9 +124,10 @@ The transport and polling layers are hardened for a long-running, multi-account 
 - **Backoff that names its cause** — 429 and challenge backoffs keep reporting "rate limited" vs
   "security check" with a retry ETA, and a re-pasted login clears the backoff immediately
   (`Polling/BackoffPolicy.cs`, `Polling/AccountRefresher.cs`).
-- **Proxy-aware** — authenticated system proxies get the signed-in user's credentials; HTTP 407 is
-  reported as a proxy problem, not a token problem; the client is rotated periodically so proxy/VPN
-  changes are picked up without a restart.
+- **Proxy-aware** — the system proxy and authenticated-proxy credentials are used automatically, and
+  HTTP 407 is reported as a proxy problem, not a token problem. (Note: .NET caches the system proxy
+  config per process, so if you connect/disconnect a VPN or change your proxy while the widget is
+  running, restart it to pick up the new settings.)
 - **Multi-credential captures** — a request that carries both a `Cookie` and an `Authorization`
   header keeps BOTH (stored as one encrypted envelope, each injected into its own header)
   (`Templating/TemplateEngine.cs`, `Import/CurlAccountImport.cs`).

@@ -34,9 +34,11 @@ public sealed class DpapiSecretStore : ISecretStore
         var encrypted = ProtectedData.Protect(plain, optionalEntropy: null, DataProtectionScope.CurrentUser);
 
         // Write-to-temp-then-rename: a crash mid-write must never leave a truncated blob that
-        // reads back as "corrupt" and silently costs the user a working login.
+        // reads back as "corrupt" and silently costs the user a working login. The temp name is
+        // unique so two concurrent writes for the same account (a re-paste racing a background
+        // migration) can't collide on one temp file.
         var path = PathFor(accountId, source);
-        var tmp = path + ".tmp";
+        var tmp = $"{path}.{Guid.NewGuid():N}.tmp";
         File.WriteAllBytes(tmp, encrypted);
         File.Move(tmp, path, overwrite: true);
     }

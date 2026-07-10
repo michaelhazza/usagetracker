@@ -14,29 +14,24 @@ namespace UsageWidget.Core.Net;
 ///     a shared container would capture one account's Set-Cookie (Cloudflare rotates cookies
 ///     constantly) and attach it to every other account's requests on the same host — silently
 ///     corrupting or cross-contaminating sessions.
-///   - Pooled connections are recycled so DNS updates, proxy failover, and half-dead sockets can't
-///     wedge the widget hours into a run.
+///   - Pooled connections are recycled on a 5-minute lifetime, so DNS updates and half-dead sockets
+///     resolve themselves without wedging the widget hours into a run (each recycle re-resolves DNS
+///     and opens a fresh connection).
 ///   - Transport-level headers from a capture (Accept-Encoding, Host, Content-Length, …) are
 ///     stripped: they describe the browser's original transport, not this one. In particular a
 ///     browser's "Accept-Encoding: … zstd" would make the server reply with compression .NET 8
 ///     cannot decode, turning every response into parse garbage.
+///
+/// KNOWN LIMITATION: .NET reads the system (WinInet/IE) proxy configuration once per process and
+/// caches it (<see cref="HttpClient.DefaultProxy"/>); there is no supported in-process way to force a
+/// re-read. If the user connects/disconnects a VPN or changes their proxy while the widget is
+/// running, they must restart it. Authenticated proxies (407) ARE handled via
+/// <see cref="SocketsHttpHandler.DefaultProxyCredentials"/>.
 /// </summary>
 public sealed class HttpClientSender : IHttpSender, IDisposable
 {
     private const int MaxRedirects = 5;
-
-    /// <summary>
-    /// How long one HttpClient (and its handler) lives before being rebuilt. On Windows, .NET
-    /// snapshots the system (IE/WinInet) proxy settings when a handler first uses them and caches
-    /// them for its lifetime — so without rotation, connecting/disconnecting a VPN or changing the
-    /// proxy breaks EVERY account until the app is restarted.
-    /// </summary>
-    private static readonly TimeSpan ClientLifetime = TimeSpan.FromMinutes(15);
-
-    private readonly object _swapLock = new();
-    private readonly bool _externalClient;
-    private HttpClient _client;
-    private DateTimeOffset _clientBuiltAt;
+    private readonly HttpClient _client;
 
     /// <summary>
     /// Headers that must never be replayed verbatim because they describe the capturing browser's
@@ -60,16 +55,7 @@ public sealed class HttpClientSender : IHttpSender, IDisposable
 
     public HttpClientSender(HttpClient? client = null)
     {
-        if (client is not null)
-        {
-            _client = client;
-            _externalClient = true;
-            _clientBuiltAt = DateTimeOffset.UtcNow;
-            return;
-        }
-
-        _client = BuildClient();
-        _clientBuiltAt = DateTimeOffset.UtcNow;
+        _client = client ?? BuildClient();
     }
 
     private static HttpClient BuildClient()
@@ -83,8 +69,8 @@ public sealed class HttpClientSender : IHttpSender, IDisposable
             // container must never be enabled here.
             UseCookies = false,
 
-            // Recycle pooled connections so a long-running widget observes DNS changes and proxy
-            // failover instead of re-using a connection to a dead endpoint forever.
+            // Recycle pooled connections so a long-running widget re-resolves DNS and drops
+            // half-dead sockets instead of re-using a connection to a dead endpoint forever.
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
             ConnectTimeout = TimeSpan.FromSeconds(10),
@@ -105,31 +91,6 @@ public sealed class HttpClientSender : IHttpSender, IDisposable
         };
     }
 
-    /// <summary>
-    /// Returns the live client, rotating it after <see cref="ClientLifetime"/> so cached system
-    /// proxy settings get re-read. The retired client is disposed on a delay long enough for any
-    /// in-flight request (10 s timeout × retries) to complete on it safely.
-    /// </summary>
-    private HttpClient CurrentClient()
-    {
-        if (_externalClient) return _client;
-
-        lock (_swapLock)
-        {
-            var now = DateTimeOffset.UtcNow;
-            if (now - _clientBuiltAt > ClientLifetime)
-            {
-                var retired = _client;
-                _client = BuildClient();
-                _clientBuiltAt = now;
-                _ = Task.Delay(TimeSpan.FromMinutes(2))
-                    .ContinueWith(_ => retired.Dispose(), TaskScheduler.Default);
-            }
-
-            return _client;
-        }
-    }
-
     public async Task<HttpResponseData> SendAsync(
         string method,
         Uri url,
@@ -142,12 +103,11 @@ public sealed class HttpClientSender : IHttpSender, IDisposable
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeout);
 
-        var client = CurrentClient();
         var current = url;
         for (var hop = 0; ; hop++)
         {
             using var request = BuildRequest(method, current, headers, body);
-            using var response = await client
+            using var response = await _client
                 .SendAsync(request, HttpCompletionOption.ResponseContentRead, timeoutCts.Token)
                 .ConfigureAwait(false);
 
@@ -194,8 +154,17 @@ public sealed class HttpClientSender : IHttpSender, IDisposable
             {
                 // A content header (e.g. Content-Type) must REPLACE the StringContent default —
                 // appending would send "text/plain; charset=utf-8, application/json".
-                content.Headers.Remove(name);
-                content.Headers.TryAddWithoutValidation(name, value);
+                // TryAddWithoutValidation also returns false for a malformed header NAME (a space,
+                // empty), and HttpHeaders.Remove VALIDATES the name and throws — so a single bad
+                // header in a hand-edited template would blow up every request. Contain it and
+                // skip the offending header, matching the old lenient behavior.
+                try
+                {
+                    content.Headers.Remove(name);
+                    content.Headers.TryAddWithoutValidation(name, value);
+                }
+                catch (FormatException) { /* invalid header name — skip it */ }
+                catch (ArgumentException) { /* empty header name — skip it */ }
             }
         }
 

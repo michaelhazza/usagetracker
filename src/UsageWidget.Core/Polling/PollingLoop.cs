@@ -33,20 +33,20 @@ public sealed class PollingLoop : IDisposable
     public void Start() => _ = RunAsync(_cts.Token);
 
     /// <summary>Manual "Refresh now" — bypasses the cadence timer (safety controls still apply downstream).</summary>
-    public async Task RefreshNowAsync()
-    {
-        var results = await RunOneCycleAsync(_cts.Token).ConfigureAwait(false);
-        OnResults?.Invoke(results);
-    }
+    public Task RefreshNowAsync() => RunOneCycleAsync(_cts.Token);
 
-    private async Task<IReadOnlyDictionary<string, UsageResult>> RunOneCycleAsync(CancellationToken ct)
+    private async Task RunOneCycleAsync(CancellationToken ct)
     {
         await _cycleGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            return await _refresher
+            var results = await _refresher
                 .RefreshAllAsync(_config(), DateTimeOffset.UtcNow, ct)
                 .ConfigureAwait(false);
+
+            // Publish INSIDE the gate so publication order matches execution order: a slow cadence
+            // cycle can never deliver its now-stale results after a later manual refresh's.
+            OnResults?.Invoke(results);
         }
         finally
         {
@@ -66,8 +66,7 @@ public sealed class PollingLoop : IDisposable
 
                 if (config.Accounts.Count > 0) // no polling on the empty state (v3.1)
                 {
-                    var results = await RunOneCycleAsync(ct).ConfigureAwait(false);
-                    OnResults?.Invoke(results);
+                    await RunOneCycleAsync(ct).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException) { break; }

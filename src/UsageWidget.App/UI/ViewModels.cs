@@ -165,7 +165,9 @@ public sealed class MainViewModel : ObservableObject
         // Preserve the live view-model (bars, countdowns, state) for accounts that still exist.
         // Rebuilding every row on any add/rename blanked ALL accounts until the next poll cycle —
         // which reads as "the widget lost every connection" each time the user touches settings.
-        var existing = Rows.ToDictionary(r => r.Account.Id);
+        // Tolerate duplicate ids from a hand-edited config (last wins) rather than throwing.
+        var existing = new Dictionary<string, AccountRowViewModel>();
+        foreach (var r in Rows) existing[r.Account.Id] = r;
 
         Rows.Clear();
         foreach (var a in accounts.OrderBy(x => x.Order))

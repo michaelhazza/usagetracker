@@ -143,11 +143,17 @@ public partial class App : Application
         Dispatcher.Invoke(() =>
         {
             var nowLocal = DateTimeOffset.Now;
+
+            // §11 stale = older than 2× the CURRENT cadence, which is longer while idle/locked —
+            // otherwise every account would read "stale" between the slower idle polls.
+            var cadence = _loop!.IsIdle() ? _config.Polling.IdleCadence : _config.Polling.DefaultCadence;
+            var staleAfter = _config.Polling.StaleAfterFor(cadence);
+
             foreach (var row in _vm!.Rows)
             {
                 if (results.TryGetValue(row.Account.Id, out var r))
                 {
-                    row.Apply(r, nowLocal, _config.Polling.StaleAfter);
+                    row.Apply(r, nowLocal, staleAfter);
                 }
             }
 
@@ -384,9 +390,24 @@ public partial class App : Application
                 // bare token into an account whose template replays a whole Cookie header would
                 // silently break it.
                 var imported = CurlAccountImport.Build(pasted, row.Account.Source);
+                var oldTemplate = row.Account.Template;
                 row.Account.Template = imported.Template;
                 _configStore.Save(_config);
-                _secrets!.Set(row.Account.Id, row.Account.Source, imported.Secret);
+
+                try
+                {
+                    _secrets!.Set(row.Account.Id, row.Account.Source, imported.Secret);
+                }
+                catch
+                {
+                    // Config was already saved pointing at the new template, but the matching
+                    // secret didn't land — roll the template back so the account isn't left with a
+                    // new template + stale secret (which would inject the old cookie into the new
+                    // Authorization header and break a previously-working account).
+                    row.Account.Template = oldTemplate;
+                    try { _configStore.Save(_config); } catch (Exception rb) { Log("repaste-rollback", rb); }
+                    throw;
+                }
             }
             else
             {

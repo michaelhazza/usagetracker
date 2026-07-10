@@ -20,6 +20,6 @@ public sealed class AdapterFactory
     {
         AccountSource.LocalhostBrowserExtension =>
             throw new NotSupportedException("LocalhostBrowserExtension is reserved and not yet implemented."),
-        _ => new TemplateAdapter(source, _mapping, _settings.RequestTimeout),
+        _ => new TemplateAdapter(source, _mapping, _settings.EffectiveRequestTimeout),
     };
 }

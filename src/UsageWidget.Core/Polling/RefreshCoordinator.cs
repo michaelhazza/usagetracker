@@ -31,7 +31,11 @@ public sealed class RefreshCoordinator
         CancellationToken ct = default,
         TimeSpan stagger = default)
     {
-        var tasks = accounts.Select(async (account, index) =>
+        // Defensively copy: the caller may hand us a snapshot of a list the UI thread mutates, so a
+        // torn read could contain a null slot or a duplicated element. Skip nulls here…
+        var snapshot = accounts.Where(a => a is not null).ToArray();
+
+        var tasks = snapshot.Select(async (account, index) =>
         {
             if (stagger > TimeSpan.Zero && index > 0)
             {
@@ -43,7 +47,12 @@ public sealed class RefreshCoordinator
         });
 
         var completed = await Task.WhenAll(tasks).ConfigureAwait(false);
-        return completed.ToDictionary(x => x.Id, x => x.result);
+
+        // …and tolerate a duplicated id: `ToDictionary` would throw and discard the WHOLE cycle's
+        // results (every row goes stale). Last-writer-wins keeps the batch intact instead.
+        var results = new Dictionary<string, UsageResult>();
+        foreach (var (id, result) in completed) results[id] = result;
+        return results;
     }
 
     private static async Task<UsageResult> SafeFetchAsync(

@@ -32,8 +32,26 @@ public static class ConfigMigrator
             version = 2;
         }
 
-        root["schemaVersion"] = version;
+        StampVersion(root, version);
         return root;
+    }
+
+    /// <summary>
+    /// Set the schema version on the EXISTING property whatever its casing, rather than the
+    /// case-sensitive <c>root["schemaVersion"] = …</c> indexer. Store-saved files use PascalCase
+    /// <c>"SchemaVersion"</c>; the indexer would append a second, contradictory camelCase key and
+    /// leave the hand-editable file carrying two version fields (§4: never confuse a hand-edited config).
+    /// </summary>
+    private static void StampVersion(JObject root, int version)
+    {
+        if (root.Property("schemaVersion", StringComparison.OrdinalIgnoreCase) is { } existing)
+        {
+            existing.Value = version;
+        }
+        else
+        {
+            root["schemaVersion"] = version;
+        }
     }
 
     /// <summary>

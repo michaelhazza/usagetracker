@@ -112,6 +112,19 @@ public class RetryingHttpSenderTests
     }
 
     [Fact]
+    public async Task Attempts_are_clamped_so_a_huge_config_value_cannot_freeze_the_cycle()
+    {
+        // A hand-edited attempts=1000 against a fast-failing endpoint would otherwise send 1000
+        // times and hold the cycle gate for many minutes. Clamp caps it at 5.
+        var script = Enumerable.Range(0, 6).Select(_ => (object)new HttpRequestException("x")).ToArray();
+        var inner = new SequenceSender(script);
+        var sender = new RetryingHttpSender(inner, attempts: 1000, delay: (_, _) => Task.CompletedTask);
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => Send(sender));
+        Assert.Equal(5, inner.Calls);
+    }
+
+    [Fact]
     public async Task Caller_cancellation_propagates_immediately_without_retry()
     {
         using var cts = new CancellationTokenSource();
@@ -189,6 +202,26 @@ public class HttpRequestConstructionTests
 
         Assert.Equal(new Version(2, 0), request.Version);
         Assert.Equal(HttpVersionPolicy.RequestVersionOrLower, request.VersionPolicy);
+    }
+
+    [Fact]
+    public void A_malformed_header_name_is_skipped_not_thrown()
+    {
+        // TryAddWithoutValidation returns false for a bad name; the content-header fallback used to
+        // call Headers.Remove, which validates and throws — blowing up every request in the cycle.
+        var headers = new Dictionary<string, string>
+        {
+            ["X Custom"] = "bad-name-has-space",   // invalid header name
+            ["Content-Type"] = "application/json", // valid content header still applied
+        };
+
+        // BuildRequest must not throw on the bad name (the bug), and must still apply the good one.
+        // Assert via NonValidated so the check itself doesn't validate "X Custom" and throw.
+        using var request = HttpClientSender.BuildRequest("POST", Url, headers, "{}");
+
+        Assert.False(request.Headers.NonValidated.Contains("X Custom"));
+        Assert.False(request.Content!.Headers.NonValidated.Contains("X Custom"));
+        Assert.Equal("application/json", Assert.Single(request.Content.Headers.GetValues("Content-Type")));
     }
 }
 
@@ -335,6 +368,59 @@ public class StaggerTests
             Now);
 
         Assert.Equal(0, delayCalls);
+    }
+
+    [Fact]
+    public async Task Duplicate_account_in_a_torn_snapshot_does_not_discard_the_whole_batch()
+    {
+        // A torn read of the UI-thread-mutated list could hand the coordinator the same account
+        // twice; ToDictionary would throw and every row would go stale. Last-writer-wins instead.
+        var dup = Acct("dup");
+        var coordinator = new RefreshCoordinator();
+
+        var results = await coordinator.RefreshAllAsync(
+            new[] { dup, dup },
+            (a, _) => Task.FromResult(UsageResult.Success(a.Nickname!, null, null, Now)),
+            Now);
+
+        Assert.Single(results);
+        Assert.True(results[dup.Id].IsSuccess);
+    }
+
+    [Fact]
+    public async Task Null_slot_in_a_torn_snapshot_is_skipped()
+    {
+        var coordinator = new RefreshCoordinator();
+        var results = await coordinator.RefreshAllAsync(
+            new[] { Acct("a"), null!, Acct("b") },
+            (a, _) => Task.FromResult(UsageResult.Success(a.Nickname!, null, null, Now)),
+            Now);
+
+        Assert.Equal(2, results.Count);
+    }
+}
+
+public class PollingSettingsClampTests
+{
+    [Theory]
+    [InlineData(0, 2)]     // zero -> min (CancelAfter would throw on non-positive)
+    [InlineData(1, 2)]     // below min
+    [InlineData(30, 30)]   // in range
+    [InlineData(600, 90)]  // above max
+    public void Request_timeout_is_clamped(int seconds, int expected)
+    {
+        var s = new PollingSettings { RequestTimeout = TimeSpan.FromSeconds(seconds) };
+        Assert.Equal(TimeSpan.FromSeconds(expected), s.EffectiveRequestTimeout);
+    }
+
+    [Theory]
+    [InlineData(-5, 0)]
+    [InlineData(2, 2)]
+    [InlineData(120, 30)]
+    public void Stagger_is_clamped(int seconds, int expected)
+    {
+        var s = new PollingSettings { StaggerInterval = TimeSpan.FromSeconds(seconds) };
+        Assert.Equal(TimeSpan.FromSeconds(expected), s.EffectiveStagger);
     }
 }
 
@@ -681,6 +767,52 @@ public class ConfigResilienceTests : IDisposable
         Assert.True(File.Exists(path));
         Assert.False(File.Exists(path + ".tmp"));
     }
+
+    [Fact]
+    public void Type_invalid_hand_edit_recovers_to_defaults_instead_of_bricking_startup()
+    {
+        // A plausible hand-edit: seconds where a TimeSpan is expected. This throws in ToObject,
+        // NOT JObject.Parse — so it used to crash Load() on every launch.
+        var path = Path.Combine(_dir, "adapter-config.json");
+        File.WriteAllText(path, """{"schemaVersion": 2, "polling": {"defaultCadence": 60}}""");
+
+        var config = new ConfigStore(path).Load();
+
+        Assert.NotNull(config);
+        Assert.True(File.Exists(path + ".corrupt.bak"));
+    }
+}
+
+public class MigrationKeyTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "uw-cfg-" + Guid.NewGuid().ToString("N"));
+
+    public MigrationKeyTests() => Directory.CreateDirectory(_dir);
+    public void Dispose() => Directory.Delete(_dir, recursive: true);
+
+    [Fact]
+    public void Migration_does_not_leave_two_conflicting_version_keys()
+    {
+        // Store-saved files use PascalCase "SchemaVersion"; the migrator must update THAT key in
+        // place, not append a second camelCase one that then races it on the next load.
+        var path = Path.Combine(_dir, "adapter-config.json");
+        File.WriteAllText(path, """
+        {
+          "SchemaVersion": 1,
+          "TemplatesBySource": {},
+          "Accounts": [],
+          "Polling": { "DefaultCadence": "00:01:00" }
+        }
+        """);
+
+        new ConfigStore(path).Load();
+
+        var rewritten = JObject.Parse(File.ReadAllText(path));
+        var versionKeys = rewritten.Properties()
+            .Count(p => p.Name.Equals("schemaVersion", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(1, versionKeys);
+        Assert.Equal(2, ConfigMigrator.ReadVersion(rewritten));
+    }
 }
 
 public class EdgeBlockClassificationTests
@@ -746,6 +878,24 @@ public class MigratingSecretStoreTests
     {
         var store = new MigratingSecretStore(new InMemorySecretStore(), new ThrowingStore());
         Assert.Null(store.Get("id1", AccountSource.ClaudeWebToken));
+    }
+
+    [Fact]
+    public void Concurrent_repaste_is_not_clobbered_by_a_racing_legacy_migration()
+    {
+        // Model the race: a Set (user re-paste) lands into the primary store while Get is deciding
+        // whether to migrate the legacy value. The re-checked migration must keep the fresh secret.
+        var primary = new InMemorySecretStore();
+        var legacy = new InMemorySecretStore();
+        legacy.Set("id1", AccountSource.ClaudeWebToken, "stale-legacy");
+        var store = new MigratingSecretStore(primary, legacy);
+
+        // Simulate the interleave deterministically: the user re-pastes before the migration write.
+        primary.Set("id1", AccountSource.ClaudeWebToken, "fresh-repaste");
+        var got = store.Get("id1", AccountSource.ClaudeWebToken);
+
+        Assert.Equal("fresh-repaste", got);
+        Assert.Equal("fresh-repaste", primary.Get("id1", AccountSource.ClaudeWebToken));
     }
 
     [Fact]

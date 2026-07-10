@@ -26,14 +26,19 @@ public sealed class RetryingHttpSender : IHttpSender
         Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         _inner = inner;
-        _attempts = Math.Max(1, attempts);
+        // Clamp the ceiling too: a hand-edited config could otherwise set hundreds of attempts,
+        // and since each holds the cycle gate, one dead endpoint would freeze the whole widget.
+        _attempts = Math.Clamp(attempts, 1, 5);
         _backoff = backoff ?? DefaultBackoff;
         _delay = delay ?? ((wait, ct) => Task.Delay(wait, ct));
     }
 
-    /// <summary>~0.5 s then ~1 s, each with up to 250 ms of jitter so parallel accounts desynchronize.</summary>
+    /// <summary>
+    /// Grows ~0.5 s, ~1 s, … with up to 250 ms of jitter (so parallel accounts desynchronize),
+    /// capped at 5 s so total in-cycle retry time stays bounded.
+    /// </summary>
     private static TimeSpan DefaultBackoff(int attempt) =>
-        TimeSpan.FromMilliseconds(500 * (attempt + 1) + Random.Shared.Next(0, 250));
+        TimeSpan.FromMilliseconds(Math.Min(500 * (attempt + 1), 5000) + Random.Shared.Next(0, 250));
 
     public async Task<HttpResponseData> SendAsync(
         string method,

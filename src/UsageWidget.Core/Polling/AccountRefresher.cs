@@ -54,7 +54,7 @@ public sealed class AccountRefresher
             (account, token) => RefreshOneAsync(account, config, now, token),
             now,
             ct,
-            config.Polling.StaggerInterval);
+            config.Polling.EffectiveStagger);
     }
 
     /// <summary>Drop backoff state for accounts that no longer exist (delete + re-add must start clean).</summary>

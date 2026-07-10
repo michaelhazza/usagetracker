@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using UsageWidget.Core.Accounts;
 
 namespace UsageWidget.Core.Secrets;
@@ -12,6 +13,7 @@ public sealed class MigratingSecretStore : ISecretStore
 {
     private readonly ISecretStore _primary;
     private readonly ISecretStore _legacy;
+    private readonly ConcurrentDictionary<string, object> _locks = new();
 
     public MigratingSecretStore(ISecretStore primary, ISecretStore legacy)
     {
@@ -22,8 +24,15 @@ public sealed class MigratingSecretStore : ISecretStore
     public string KeyFor(string accountId, AccountSource source) => _primary.KeyFor(accountId, source);
 
     /// <summary>New and re-pasted secrets go to the primary store only.</summary>
-    public void Set(string accountId, AccountSource source, string secret) =>
-        _primary.Set(accountId, source, secret);
+    public void Set(string accountId, AccountSource source, string secret)
+    {
+        // Serialize with a concurrent migration write for the same account so a background poll's
+        // legacy-migration can never land AFTER (and clobber) a fresh re-paste.
+        lock (LockFor(accountId, source))
+        {
+            _primary.Set(accountId, source, secret);
+        }
+    }
 
     public string? Get(string accountId, AccountSource source)
     {
@@ -42,12 +51,23 @@ public sealed class MigratingSecretStore : ISecretStore
 
         if (string.IsNullOrEmpty(legacySecret)) return null;
 
-        // Migrate forward best-effort: this read must succeed even if the write doesn't.
-        try { _primary.Set(accountId, source, legacySecret); }
-        catch { /* next Get falls back again */ }
+        // Migrate forward best-effort. Under the per-account lock, re-check the primary is STILL
+        // empty: if a user re-pasted between our miss and here, keep their fresh secret and just
+        // return the legacy value for this one call. This read must succeed even if the write doesn't.
+        lock (LockFor(accountId, source))
+        {
+            var current = _primary.Get(accountId, source);
+            if (!string.IsNullOrEmpty(current)) return current;
+
+            try { _primary.Set(accountId, source, legacySecret); }
+            catch { /* next Get falls back again */ }
+        }
 
         return legacySecret;
     }
+
+    private object LockFor(string accountId, AccountSource source) =>
+        _locks.GetOrAdd(KeyFor(accountId, source), _ => new object());
 
     /// <summary>Account deletion must wipe the credential wherever it lives (contract: cleanup).</summary>
     public bool Delete(string accountId, AccountSource source)
