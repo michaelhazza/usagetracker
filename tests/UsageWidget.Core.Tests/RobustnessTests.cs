@@ -79,14 +79,32 @@ public class RetryingHttpSenderTests
         Assert.Equal(1, inner.Calls);
     }
 
-    [Fact]
-    public async Task Challenge_responses_are_not_retried_even_on_retryable_status()
+    [Theory]
+    [InlineData(500)]
+    [InlineData(502)]
+    [InlineData(503)]
+    [InlineData(520)] // Cloudflare origin errors — not in any standard enum, but constant in
+    [InlineData(522)] // front of these providers; they must get the in-cycle retry too
+    [InlineData(524)]
+    public async Task Server_side_trouble_including_cloudflare_origin_errors_is_retried(int status)
     {
-        var challenge = FakeSender.Html(Fixtures.Read("challenge", "cloudflare.html"), 503);
+        var inner = new SequenceSender(FakeSender.Json("edge sad", status), FakeSender.Json("{}"));
+        var response = await Send(NoDelay(inner));
+
+        Assert.Equal(200, response.StatusCode);
+        Assert.Equal(2, inner.Calls);
+    }
+
+    [Theory]
+    [InlineData(503)]
+    [InlineData(520)]
+    public async Task Challenge_responses_are_not_retried_even_on_retryable_status(int status)
+    {
+        var challenge = FakeSender.Html(Fixtures.Read("challenge", "cloudflare.html"), status);
         var inner = new SequenceSender(challenge);
         var response = await Send(NoDelay(inner));
 
-        Assert.Equal(503, response.StatusCode);
+        Assert.Equal(status, response.StatusCode);
         Assert.Equal(1, inner.Calls); // hammering a challenge escalates the block
     }
 
@@ -721,6 +739,44 @@ public class MultiCredentialTests
             headers, """{"kind":"jwt-ish","value":"x"}""");
 
         Assert.Equal("""Bearer {"kind":"jwt-ish","value":"x"}""", injected["authorization"]);
+    }
+
+    [Fact]
+    public void Multi_credential_template_reports_multiple_placeholders_for_the_repaste_guard()
+    {
+        // The bare-token re-paste guard keys off this count: >1 means a plain pasted value would
+        // be injected into BOTH credential headers, downgrading the account — it must be blocked.
+        var imported = Import.CurlAccountImport.Build(CurlWithBothCredentials, AccountSource.CodexPastedToken);
+
+        Assert.Equal(2, imported.Template.CountCredentialPlaceholders());
+    }
+
+    [Fact]
+    public void Single_credential_template_reports_one_placeholder()
+    {
+        const string cookieOnly =
+            "curl 'https://claude.ai/api/organizations/ORG/usage' -H 'cookie: sessionKey=EXAMPLE'";
+        var imported = Import.CurlAccountImport.Build(cookieOnly, AccountSource.ClaudeWebToken);
+
+        Assert.Equal(1, imported.Template.CountCredentialPlaceholders());
+    }
+
+    [Fact]
+    public void Credential_header_without_a_placeholder_does_not_count()
+    {
+        // e.g. a hand-edited template that hardcodes a non-secret value in a credential-named
+        // header: only real {{TOKEN}} slots demand credentials from the store.
+        var template = new UsageWidget.Core.Templating.RequestTemplate
+        {
+            Headers =
+            {
+                ["cookie"] = UsageWidget.Core.Templating.RequestTemplate.TokenPlaceholder,
+                ["authorization"] = "Bearer static-public-value",
+                ["accept"] = "application/json",
+            },
+        };
+
+        Assert.Equal(1, template.CountCredentialPlaceholders());
     }
 }
 

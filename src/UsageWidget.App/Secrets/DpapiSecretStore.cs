@@ -39,8 +39,17 @@ public sealed class DpapiSecretStore : ISecretStore
         // migration) can't collide on one temp file.
         var path = PathFor(accountId, source);
         var tmp = $"{path}.{Guid.NewGuid():N}.tmp";
-        File.WriteAllBytes(tmp, encrypted);
-        File.Move(tmp, path, overwrite: true);
+        try
+        {
+            File.WriteAllBytes(tmp, encrypted);
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch
+        {
+            // Don't let failed writes accumulate orphaned encrypted blobs on disk.
+            try { File.Delete(tmp); } catch { /* best-effort cleanup */ }
+            throw;
+        }
     }
 
     public string? Get(string accountId, AccountSource source)

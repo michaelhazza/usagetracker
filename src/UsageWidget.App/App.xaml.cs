@@ -381,9 +381,24 @@ public partial class App : Application
         var pasted = TokenPromptWindow.Prompt(row.Label);
         if (string.IsNullOrWhiteSpace(pasted)) return;
 
+        var isCurl = pasted.TrimStart().StartsWith("curl", StringComparison.OrdinalIgnoreCase);
+
+        // A bare token can never replace a multi-credential login: the single value would be
+        // injected into EVERY credential header (cookie AND authorization), silently breaking an
+        // account that needs both. Require the full capture, which refreshes them together.
+        var effectiveTemplate = row.Account.Template ?? _config.TemplateFor(row.Account.Source);
+        if (!isCurl && effectiveTemplate is not null && effectiveTemplate.CountCredentialPlaceholders() > 1)
+        {
+            MessageBox.Show(
+                "This account uses multiple login credentials (cookie and authorization). " +
+                "Re-paste the full \"Copy as cURL\" request from DevTools instead of a single token.",
+                "Usage Widget", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
         try
         {
-            if (pasted.TrimStart().StartsWith("curl", StringComparison.OrdinalIgnoreCase))
+            if (isCurl)
             {
                 // A full "Copy as cURL" refreshes the captured template AND the secret — the
                 // reliable recovery when edge cookies rotated or the endpoint moved. Pasting a

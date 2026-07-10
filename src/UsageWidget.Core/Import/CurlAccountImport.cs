@@ -10,9 +10,10 @@ namespace UsageWidget.Core.Import;
 /// </summary>
 public static class CurlAccountImport
 {
-    // Headers whose value is a credential. The first one present becomes the stored secret; any
-    // others are dropped so no real secret is ever written to the plaintext template.
-    private static readonly string[] SecretHeaders = { "cookie", "authorization", "x-api-key", "anthropic-api-key" };
+    // Headers whose value is a credential, in cookie-first priority order. The shared definition
+    // lives on RequestTemplate so the re-paste guard agrees with the importer about what counts
+    // as a credential header.
+    private static string[] SecretHeaders => RequestTemplate.CredentialHeaderNames;
 
     // Headers that break a server-side replay or leak nothing useful — stripped on import.
     private static readonly HashSet<string> StripHeaders = new(StringComparer.OrdinalIgnoreCase)

@@ -9,6 +9,27 @@ public sealed class RequestTemplate
 {
     public const string TokenPlaceholder = "{{TOKEN}}";
 
+    /// <summary>
+    /// Header names that carry credentials, in priority order (cookie first — claude.ai session
+    /// auth). Shared by the importer (which extracts these values into the secret store) and the
+    /// re-paste guard (which must know when a template needs more than one credential).
+    /// </summary>
+    public static readonly string[] CredentialHeaderNames =
+        { "cookie", "authorization", "x-api-key", "anthropic-api-key" };
+
+    public static bool IsCredentialHeader(string name) =>
+        CredentialHeaderNames.Contains(name, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// How many credential headers still carry the <see cref="TokenPlaceholder"/>. More than one
+    /// means the stored secret must be a multi-credential envelope — a bare pasted token would be
+    /// injected verbatim into EVERY one of these headers and break the account.
+    /// (A method, not a property, so Newtonsoft never serializes it into the config file.)
+    /// </summary>
+    public int CountCredentialPlaceholders() =>
+        Headers.Count(h => IsCredentialHeader(h.Key) &&
+                           h.Value.Contains(TokenPlaceholder, StringComparison.Ordinal));
+
     public string Url { get; set; } = "";
     public string Method { get; set; } = "GET";
 

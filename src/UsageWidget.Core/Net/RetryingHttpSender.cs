@@ -12,8 +12,6 @@ namespace UsageWidget.Core.Net;
 /// </summary>
 public sealed class RetryingHttpSender : IHttpSender
 {
-    private static readonly int[] RetryableStatuses = { 408, 500, 502, 503, 504 };
-
     private readonly IHttpSender _inner;
     private readonly int _attempts;
     private readonly Func<int, TimeSpan> _backoff;
@@ -59,7 +57,7 @@ public sealed class RetryingHttpSender : IHttpSender
                     .ConfigureAwait(false);
 
                 if (lastAttempt ||
-                    !RetryableStatuses.Contains(response.StatusCode) ||
+                    !IsRetryable(response) ||
                     ChallengeDetector.IsChallenge(response.ContentType, response.Body))
                 {
                     return response;
@@ -77,4 +75,12 @@ public sealed class RetryingHttpSender : IHttpSender
             await _delay(_backoff(attempt), ct).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// Mirrors <see cref="ResponseClassifier"/>'s "server-side trouble is transient" rule: 408 and
+    /// EVERY 5xx. Cloudflare's origin errors (520–526) arrive constantly in front of these
+    /// providers — enumerating specific codes silently excluded them from the in-cycle retry.
+    /// </summary>
+    private static bool IsRetryable(HttpResponseData response) =>
+        response.StatusCode == 408 || response.StatusCode >= 500;
 }
