@@ -31,6 +31,12 @@ public sealed class MigratingSecretStore : ISecretStore
         lock (LockFor(accountId, source))
         {
             _primary.Set(accountId, source, secret);
+
+            // The superseded legacy copy must not remain an active fallback: if the primary blob
+            // were later lost or corrupted, Get() would silently resurrect the expired/revoked
+            // credential the user just replaced. Best-effort — the re-paste already succeeded.
+            try { _legacy.Delete(accountId, source); }
+            catch { /* primary write succeeded; cleanup failure must not fail the re-paste */ }
         }
     }
 
@@ -59,8 +65,19 @@ public sealed class MigratingSecretStore : ISecretStore
             var current = _primary.Get(accountId, source);
             if (!string.IsNullOrEmpty(current)) return current;
 
-            try { _primary.Set(accountId, source, legacySecret); }
-            catch { /* next Get falls back again */ }
+            try
+            {
+                _primary.Set(accountId, source, legacySecret);
+            }
+            catch
+            {
+                return legacySecret; // migration failed — KEEP the legacy copy as the only source
+            }
+
+            // Migration landed in the primary store; retire the legacy copy so it can never later
+            // resurrect a stale credential. Best-effort — the migrated value is already safe.
+            try { _legacy.Delete(accountId, source); }
+            catch { /* cleanup failure must not fail this read */ }
         }
 
         return legacySecret;

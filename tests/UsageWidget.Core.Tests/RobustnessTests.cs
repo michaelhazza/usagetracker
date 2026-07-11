@@ -967,6 +967,104 @@ public class MigratingSecretStoreTests
         Assert.Null(primary.Get("id1", AccountSource.ClaudeWebToken));
         Assert.Null(legacy.Get("id1", AccountSource.ClaudeWebToken));
     }
+
+    /// <summary>Legacy store whose reads work but whose Delete always fails (e.g. CredMan locked).</summary>
+    private sealed class DeleteThrowsStore : ISecretStore
+    {
+        private readonly InMemorySecretStore _inner = new();
+        public string KeyFor(string accountId, AccountSource source) => _inner.KeyFor(accountId, source);
+        public void Set(string accountId, AccountSource source, string secret) => _inner.Set(accountId, source, secret);
+        public string? Get(string accountId, AccountSource source) => _inner.Get(accountId, source);
+        public bool Delete(string accountId, AccountSource source) => throw new IOException("locked");
+    }
+
+    [Fact]
+    public void Fresh_repaste_retires_the_legacy_copy_so_it_can_never_resurrect()
+    {
+        var primary = new InMemorySecretStore();
+        var legacy = new InMemorySecretStore();
+        legacy.Set("id1", AccountSource.ClaudeWebToken, "revoked-old-session");
+        var store = new MigratingSecretStore(primary, legacy);
+
+        store.Set("id1", AccountSource.ClaudeWebToken, "fresh");
+        Assert.Null(legacy.Get("id1", AccountSource.ClaudeWebToken));
+
+        // Even if the primary blob is later lost/corrupted, the revoked credential must NOT
+        // silently come back — a re-paste prompt is correct, a stale session is not.
+        primary.Delete("id1", AccountSource.ClaudeWebToken);
+        Assert.Null(store.Get("id1", AccountSource.ClaudeWebToken));
+    }
+
+    [Fact]
+    public void Successful_migration_removes_the_legacy_entry()
+    {
+        var primary = new InMemorySecretStore();
+        var legacy = new InMemorySecretStore();
+        legacy.Set("id1", AccountSource.ClaudeWebToken, "old");
+        var store = new MigratingSecretStore(primary, legacy);
+
+        Assert.Equal("old", store.Get("id1", AccountSource.ClaudeWebToken));
+
+        Assert.Equal("old", primary.Get("id1", AccountSource.ClaudeWebToken));
+        Assert.Null(legacy.Get("id1", AccountSource.ClaudeWebToken)); // migration direction is one-way
+    }
+
+    /// <summary>Primary store that reads as empty but rejects writes (e.g. disk full).</summary>
+    private sealed class SetThrowsStore : ISecretStore
+    {
+        public string KeyFor(string accountId, AccountSource source) => SecretKey.For(accountId, source);
+        public void Set(string accountId, AccountSource source, string secret) => throw new IOException("disk full");
+        public string? Get(string accountId, AccountSource source) => null;
+        public bool Delete(string accountId, AccountSource source) => false;
+    }
+
+    [Fact]
+    public void Failed_migration_write_keeps_the_legacy_copy()
+    {
+        // If the primary write fails, the legacy entry is the ONLY copy — it must survive
+        // (and the read itself must still hand back the credential).
+        var legacy = new InMemorySecretStore();
+        legacy.Set("id1", AccountSource.ClaudeWebToken, "old");
+        var store = new MigratingSecretStore(new SetThrowsStore(), legacy);
+
+        Assert.Equal("old", store.Get("id1", AccountSource.ClaudeWebToken));
+        Assert.Equal("old", legacy.Get("id1", AccountSource.ClaudeWebToken));
+    }
+
+    [Fact]
+    public void Legacy_delete_failure_does_not_fail_the_repaste_or_the_migration()
+    {
+        var primary = new InMemorySecretStore();
+        var legacy = new DeleteThrowsStore();
+        legacy.Set("id1", AccountSource.ClaudeWebToken, "old");
+        var store = new MigratingSecretStore(primary, legacy);
+
+        store.Set("id1", AccountSource.ClaudeWebToken, "fresh"); // must not throw
+        Assert.Equal("fresh", store.Get("id1", AccountSource.ClaudeWebToken));
+
+        legacy.Set("id2", AccountSource.ClaudeWebToken, "old2");
+        Assert.Equal("old2", store.Get("id2", AccountSource.ClaudeWebToken)); // migration must not throw
+        Assert.Equal("old2", primary.Get("id2", AccountSource.ClaudeWebToken));
+    }
+}
+
+public class StaleMultiplierClampTests
+{
+    [Theory]
+    [InlineData(-3.0, 1.0)]                    // negative -> floor
+    [InlineData(0.0, 1.0)]                     // zero would flag rows stale instantly
+    [InlineData(double.NaN, 2.0)]              // NaN -> default
+    [InlineData(double.PositiveInfinity, 10.0)]
+    [InlineData(1e9, 10.0)]                    // absurd -> ceiling (TimeSpan math would overflow)
+    [InlineData(2.0, 2.0)]                     // sane value passes through
+    public void Hand_edited_multiplier_is_normalized(double value, double effective)
+    {
+        var s = new PollingSettings { StaleCadenceMultiplier = value };
+
+        Assert.Equal(
+            TimeSpan.FromMinutes(10 * effective),
+            s.StaleAfterFor(TimeSpan.FromMinutes(10)));
+    }
 }
 
 public class FormatAgeTests

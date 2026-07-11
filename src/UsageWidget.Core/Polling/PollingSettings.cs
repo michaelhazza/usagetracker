@@ -53,9 +53,17 @@ public sealed class PollingSettings
     /// <summary>
     /// The age beyond which a row's last good data counts as stale (§11), computed from the CURRENT
     /// cadence — the host passes the idle or default cadence so idle polls aren't wrongly flagged stale.
+    /// The hand-editable multiplier is normalized (NaN → default, else clamped to 1–10) so a bad
+    /// value can't mark rows instantly-stale or throw inside TimeSpan arithmetic on the UI thread.
     /// </summary>
-    public TimeSpan StaleAfterFor(TimeSpan currentCadence) => currentCadence * StaleCadenceMultiplier;
+    public TimeSpan StaleAfterFor(TimeSpan currentCadence)
+    {
+        var multiplier = double.IsNaN(StaleCadenceMultiplier)
+            ? 2.0
+            : Math.Clamp(StaleCadenceMultiplier, 1.0, 10.0);
+        return currentCadence * multiplier;
+    }
 
     public bool IsStale(DateTimeOffset lastGoodRefresh, DateTimeOffset now, TimeSpan cadence) =>
-        now - lastGoodRefresh > cadence * StaleCadenceMultiplier;
+        now - lastGoodRefresh > StaleAfterFor(cadence);
 }
