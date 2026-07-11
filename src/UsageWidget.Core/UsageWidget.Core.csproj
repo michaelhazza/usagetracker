@@ -13,4 +13,9 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Lets the offline suite exercise request construction (header sanitizing, content headers). -->
+    <InternalsVisibleTo Include="UsageWidget.Core.Tests" />
+  </ItemGroup>
+
 </Project>

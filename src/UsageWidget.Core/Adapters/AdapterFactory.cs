@@ -1,9 +1,8 @@
 using UsageWidget.Core.Accounts;
-using UsageWidget.Core.Adapters;
 using UsageWidget.Core.Polling;
 using UsageWidget.Core.Templating;
 
-namespace UsageWidget.App.Services;
+namespace UsageWidget.Core.Adapters;
 
 /// <summary>
 /// Builds the right adapter per source type. Today every replay-based source uses the generic
@@ -21,6 +20,6 @@ public sealed class AdapterFactory
     {
         AccountSource.LocalhostBrowserExtension =>
             throw new NotSupportedException("LocalhostBrowserExtension is reserved and not yet implemented."),
-        _ => new TemplateAdapter(source, _mapping, _settings.RequestTimeout),
+        _ => new TemplateAdapter(source, _mapping, _settings.EffectiveRequestTimeout),
     };
 }

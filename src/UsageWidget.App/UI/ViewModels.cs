@@ -74,7 +74,11 @@ public sealed class AccountRowViewModel : ObservableObject
         }
     }
 
-    public bool NeedsRepaste => State == RowState.Unauthorized;
+    /// <summary>
+    /// Re-paste is the remedy for an expired session AND for a challenge (a fresh capture brings
+    /// fresh edge cookies) — both need the button, or the row's advice is a dead end.
+    /// </summary>
+    public bool NeedsRepaste => State is RowState.Unauthorized or RowState.Challenge;
 
     /// <summary>Show a status line for anything that isn't a clean success (loading or any error).</summary>
     public bool ShowStatus => State != RowState.Ok;
@@ -98,12 +102,15 @@ public sealed class AccountRowViewModel : ObservableObject
     private string Fallback(string defaultText) =>
         string.IsNullOrWhiteSpace(_stateMessage) ? defaultText : _stateMessage;
 
+    private DateTimeOffset? _lastGoodAt;
+
     /// <summary>Apply a refresh result. Countdowns are rendered in local time (contract #6).</summary>
-    public void Apply(UsageResult result, DateTimeOffset nowLocal)
+    public void Apply(UsageResult result, DateTimeOffset nowLocal, TimeSpan staleAfter)
     {
-        Label = result.AccountLabel;
         if (result.IsSuccess)
         {
+            _lastGoodAt = result.FetchedAt;
+            Label = result.AccountLabel;
             State = RowState.Ok;
             StateMessage = "";
             SessionPct = result.Session?.Pct;
@@ -113,6 +120,8 @@ public sealed class AccountRowViewModel : ObservableObject
         }
         else
         {
+            // A transient failure must not make the row look like a dead account: keep the last
+            // good bars and the last resolved label (a failure result only knows the nickname).
             State = result.ErrorKind switch
             {
                 RefreshErrorKind.Unauthorized => RowState.Unauthorized,
@@ -121,7 +130,16 @@ public sealed class AccountRowViewModel : ObservableObject
                 RefreshErrorKind.Challenge => RowState.Challenge,
                 _ => RowState.ConfigProblem,
             };
-            StateMessage = result.ErrorMessage ?? "";
+
+            // §11 stale indicator: once the last good refresh is older than 2× the cadence, say
+            // how old the numbers on screen actually are.
+            var message = result.ErrorMessage ?? "";
+            if (_lastGoodAt is { } lastGood && nowLocal - lastGood > staleAfter)
+            {
+                message = $"{message} Showing data from {TimeMath.FormatAge(lastGood, nowLocal)}.".TrimStart();
+            }
+
+            StateMessage = message;
         }
     }
 
@@ -144,10 +162,17 @@ public sealed class MainViewModel : ObservableObject
 
     public void Sync(IReadOnlyCollection<Account> accounts)
     {
+        // Preserve the live view-model (bars, countdowns, state) for accounts that still exist.
+        // Rebuilding every row on any add/rename blanked ALL accounts until the next poll cycle —
+        // which reads as "the widget lost every connection" each time the user touches settings.
+        // Tolerate duplicate ids from a hand-edited config (last wins) rather than throwing.
+        var existing = new Dictionary<string, AccountRowViewModel>();
+        foreach (var r in Rows) existing[r.Account.Id] = r;
+
         Rows.Clear();
         foreach (var a in accounts.OrderBy(x => x.Order))
         {
-            Rows.Add(new AccountRowViewModel(a));
+            Rows.Add(existing.TryGetValue(a.Id, out var row) ? row : new AccountRowViewModel(a));
         }
 
         IsEmpty = Rows.Count == 0;

@@ -8,17 +8,20 @@ namespace UsageWidget.Core.Security;
 /// </summary>
 public static class ChallengeDetector
 {
+    // Only markers UNIQUE to challenge/block interstitials. Deliberately absent: the bare word
+    // "cloudflare" (it appears on every Cloudflare-served page, including transient 5xx error
+    // pages — flagging those as Challenge turns a routine gateway blip into a 5–60 min backoff)
+    // and generic "enable JavaScript" noscript text (any SPA login page contains it).
     private static readonly string[] Markers =
     {
-        "cf-chl",            // Cloudflare challenge token / element ids
-        "cloudflare",
-        "just a moment",     // Cloudflare interstitial title
-        "captcha",
-        "attention required",
-        "enable javascript", // "Please enable JavaScript" challenge pages
-        "javascript is required",
-        "checking your browser",
+        "cf-chl",              // Cloudflare challenge token / element ids
         "_cf_chl_opt",
+        "cf-turnstile",        // Cloudflare Turnstile widget
+        "challenge-platform",  // /cdn-cgi/challenge-platform/ script on every challenge page
+        "just a moment",       // Cloudflare interstitial title
+        "checking your browser",
+        "attention required",  // Cloudflare WAF block page title
+        "captcha",
     };
 
     /// <summary>
@@ -49,5 +52,21 @@ public static class ChallengeDetector
 
         var trimmed = body?.TrimStart();
         return !string.IsNullOrEmpty(trimmed) && (trimmed[0] == '{' || trimmed[0] == '[');
+    }
+
+    /// <summary>
+    /// True when the response is a web PAGE rather than data — used to tell "the provider served
+    /// its login/block page" apart from "the JSON shape changed" (§3 classification honesty).
+    /// </summary>
+    public static bool LooksLikeHtml(string? contentType, string? body)
+    {
+        if (!string.IsNullOrEmpty(contentType) &&
+            contentType.Contains("text/html", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var trimmed = body?.TrimStart();
+        return !string.IsNullOrEmpty(trimmed) && trimmed[0] == '<';
     }
 }

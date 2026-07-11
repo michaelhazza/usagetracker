@@ -38,21 +38,41 @@ public sealed class ConfigStore
         }
 
         var raw = File.ReadAllText(_path);
-        var root = JObject.Parse(raw);
-        var version = ConfigMigrator.ReadVersion(root);
-
-        if (version < AdapterConfig.CurrentSchemaVersion)
+        try
         {
-            // Back up the prior file before rewriting it.
-            var backupPath = $"{_path}.{version}.bak";
-            File.WriteAllText(backupPath, raw);
+            var root = JObject.Parse(raw);
+            var version = ConfigMigrator.ReadVersion(root);
 
-            root = ConfigMigrator.Migrate(root);
-            File.WriteAllText(_path, root.ToString(Formatting.Indented));
+            if (version < AdapterConfig.CurrentSchemaVersion)
+            {
+                // Back up the prior file before rewriting it.
+                var backupPath = $"{_path}.{version}.bak";
+                File.WriteAllText(backupPath, raw);
+
+                root = ConfigMigrator.Migrate(root);
+                WriteAtomically(root.ToString(Formatting.Indented));
+            }
+
+            // Deserialization is inside the guard too: a hand-edited TYPE error ("defaultCadence": 60,
+            // a misspelled enum, accounts-as-object) throws here, not just at parse — and must
+            // self-recover, not brick startup on every launch.
+            return root.ToObject<AdapterConfig>(JsonSerializer.Create(SerializerSettings))
+                   ?? new AdapterConfig();
         }
+        catch (JsonException)
+        {
+            // A torn/corrupt/type-invalid file must not brick startup forever. Preserve the
+            // evidence and start from defaults — secrets live elsewhere and survive.
+            TryBackupCorrupt();
+            return new AdapterConfig();
+        }
+    }
 
-        return root.ToObject<AdapterConfig>(JsonSerializer.Create(SerializerSettings))
-               ?? new AdapterConfig();
+    /// <summary>Best-effort: the recovery path must never itself throw and re-brick startup.</summary>
+    private void TryBackupCorrupt()
+    {
+        try { File.Copy(_path, _path + ".corrupt.bak", overwrite: true); }
+        catch { /* the file may be locked; recovering to defaults still beats crashing */ }
     }
 
     public void Save(AdapterConfig config)
@@ -61,7 +81,19 @@ public sealed class ConfigStore
         var dir = Path.GetDirectoryName(_path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-        var json = JsonConvert.SerializeObject(config, SerializerSettings);
-        File.WriteAllText(_path, json);
+        WriteAtomically(JsonConvert.SerializeObject(config, SerializerSettings));
+    }
+
+    /// <summary>
+    /// Write-to-temp-then-rename so a crash mid-save can never leave the live config half-written
+    /// and unreadable (the accounts list lives here — a truncated file looks like every account
+    /// vanished). The rename is atomic on the same volume; readers see either the old or the new
+    /// file, never a partial one.
+    /// </summary>
+    private void WriteAtomically(string json)
+    {
+        var tmp = _path + ".tmp";
+        File.WriteAllText(tmp, json);
+        File.Move(tmp, _path, overwrite: true);
     }
 }

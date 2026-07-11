@@ -26,8 +26,32 @@ public static class ConfigMigrator
             version = 1;
         }
 
-        root["schemaVersion"] = version;
+        if (version < 2)
+        {
+            root = MigrateV1ToV2(root);
+            version = 2;
+        }
+
+        StampVersion(root, version);
         return root;
+    }
+
+    /// <summary>
+    /// Set the schema version on the EXISTING property whatever its casing, rather than the
+    /// case-sensitive <c>root["schemaVersion"] = …</c> indexer. Store-saved files use PascalCase
+    /// <c>"SchemaVersion"</c>; the indexer would append a second, contradictory camelCase key and
+    /// leave the hand-editable file carrying two version fields (§4: never confuse a hand-edited config).
+    /// </summary>
+    private static void StampVersion(JObject root, int version)
+    {
+        if (root.Property("schemaVersion", StringComparison.OrdinalIgnoreCase) is { } existing)
+        {
+            existing.Value = version;
+        }
+        else
+        {
+            root["schemaVersion"] = version;
+        }
     }
 
     /// <summary>
@@ -44,5 +68,35 @@ public static class ConfigMigrator
         }
 
         return root;
+    }
+
+    /// <summary>
+    /// v1 → v2: v1 shipped with an aggressive 1-minute cadence (and 5-minute idle cadence) that
+    /// polls edge-protected providers hard enough to draw rate limits and challenges (§11 says
+    /// 3 min / 15 min). Only the exact OLD DEFAULTS are raised — a value the user hand-edited to
+    /// anything else is respected.
+    /// </summary>
+    private static JObject MigrateV1ToV2(JObject root)
+    {
+        // Saved files use PascalCase keys; hand-edited ones may use camelCase — match either.
+        if (root.TryGetValue("polling", StringComparison.OrdinalIgnoreCase, out var p) &&
+            p is JObject polling)
+        {
+            RaiseOldDefault(polling, "defaultCadence", "00:01:00", "00:03:00");
+            RaiseOldDefault(polling, "idleCadence", "00:05:00", "00:15:00");
+        }
+
+        return root;
+    }
+
+    private static void RaiseOldDefault(JObject polling, string key, string oldDefault, string newValue)
+    {
+        if (polling.TryGetValue(key, StringComparison.OrdinalIgnoreCase, out var value) &&
+            value.Type == JTokenType.String &&
+            (string?)value == oldDefault)
+        {
+            // JToken.Replace keeps the original property (and its casing) in place.
+            value.Replace(newValue);
+        }
     }
 }

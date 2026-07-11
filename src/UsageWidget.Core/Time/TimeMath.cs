@@ -58,6 +58,19 @@ public static class TimeMath
     }
 
     /// <summary>
+    /// Render how long ago something happened ("just now", "5 min ago", "3h ago", "2 days ago").
+    /// Used to show the age of the last good refresh while an account is failing (§11 stale).
+    /// </summary>
+    public static string FormatAge(DateTimeOffset then, DateTimeOffset now)
+    {
+        var age = now - then;
+        if (age < TimeSpan.FromMinutes(1)) return "just now";
+        if (age.TotalHours < 1) return $"{(int)age.TotalMinutes} min ago";
+        if (age.TotalDays < 1) return $"{(int)age.TotalHours}h ago";
+        return $"{(int)age.TotalDays} day{((int)age.TotalDays == 1 ? "" : "s")} ago";
+    }
+
+    /// <summary>
     /// Render a human countdown ("4h 32m", "12m 03s", "now"). Caller passes local-time values per
     /// contract #6; the math is offset-agnostic.
     /// </summary>

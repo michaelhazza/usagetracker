@@ -65,21 +65,27 @@ public sealed class TemplateAdapter : IProviderAdapter
                 .SendAsync(template.Method, url, headers, body, template.FollowRedirects, _timeout, ct)
                 .ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return UsageResult.Failure(RefreshErrorKind.NetworkTimeout, label, "Request timed out.", now);
+            // App shutdown / cycle cancellation — propagate; a bogus "timed out" result would be a lie.
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return UsageResult.Failure(
+                RefreshErrorKind.NetworkTimeout, label,
+                $"No answer within {(int)_timeout.TotalSeconds}s — will retry.", now);
         }
         catch (Exception ex)
         {
             return UsageResult.Failure(
-                RefreshErrorKind.NetworkTimeout, label, Redactor.Redact(ex.Message), now);
+                RefreshErrorKind.NetworkTimeout, label, TransportError.Describe(ex), now);
         }
 
         // (4) Classify.
-        var error = ResponseClassifier.Classify(response);
-        if (error is not null)
+        if (ResponseClassifier.Classify(response) is { } error)
         {
-            return UsageResult.Failure(error.Value, label, DescribeError(error.Value), now);
+            return UsageResult.Failure(error.Kind, label, error.Message, now);
         }
 
         // (5) Map and validate.
@@ -89,26 +95,35 @@ public sealed class TemplateAdapter : IProviderAdapter
             var resolvedLabel = account.DisplayLabel(extracted.Identity);
             var result = UsageResult.Success(resolvedLabel, extracted.Session, extracted.Weekly, now);
 
-            return result.HasUsableData
-                ? result
+            if (result.HasUsableData) return result;
+
+            return LooksLikeHtml(response)
+                ? HtmlInsteadOfData(resolvedLabel, now)
                 : UsageResult.Failure(
                     RefreshErrorKind.ParseFailed, resolvedLabel,
                     "Response parsed but no usage fields matched the configured mappings.", now);
         }
         catch (MappingException)
         {
-            return UsageResult.Failure(
-                RefreshErrorKind.ParseFailed, label,
-                "Response was not valid JSON for the configured mappings.", now);
+            return LooksLikeHtml(response)
+                ? HtmlInsteadOfData(label, now)
+                : UsageResult.Failure(
+                    RefreshErrorKind.ParseFailed, label,
+                    "Response was not valid JSON for the configured mappings.", now);
         }
     }
 
-    private static string DescribeError(RefreshErrorKind kind) => kind switch
-    {
-        RefreshErrorKind.Unauthorized => "Token expired or unauthorized — re-paste required.",
-        RefreshErrorKind.RateLimited => "Rate limited by the provider — backing off.",
-        RefreshErrorKind.Challenge => "Blocked by an edge challenge (e.g. Cloudflare).",
-        RefreshErrorKind.NetworkTimeout => "Network or server error.",
-        _ => "Could not parse the usage response.",
-    };
+    /// <summary>
+    /// A 200 whose body is a web page instead of usage data is almost always the provider serving
+    /// its login page to a dead session — an auth problem, not the "config problem" that
+    /// ParseFailed would tell the user to debug in the template editor.
+    /// </summary>
+    private static bool LooksLikeHtml(HttpResponseData response) =>
+        ChallengeDetector.LooksLikeHtml(response.ContentType, response.Body);
+
+    private static UsageResult HtmlInsteadOfData(string label, DateTimeOffset now) =>
+        UsageResult.Failure(
+            RefreshErrorKind.Unauthorized, label,
+            "Got a web page instead of usage data — the session has likely expired; re-paste the request.",
+            now);
 }
